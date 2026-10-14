@@ -95,7 +95,7 @@ spec:
           allocationMode: All
           capacity:
             requests:
-              memorytier.openshift.io/memory: 1Gi
+              memorytier.openshift.io/memory: 1Gi    # the driver's capacity domain
 ```
 
 Verify the placement on the node:
@@ -146,9 +146,10 @@ node.
   directories (registration + checkpoint state) and cgroup write access.
   On OpenShift, grant the `privileged` SCC to the driver's service
   account.
-- **Attribute names must be C identifiers**: the driver publishes
-  `memorytier.openshift.io/numa_node` (underscore, not hyphen) — the
-  API server rejects hyphens in attribute names.
+- **Attribute names must be C identifiers**: the driver publishes its
+  attributes under the `memorytier.openshift.io` domain (the identifier
+  the current build registers with the kubelet) — attribute names use
+  underscores (`numa_node`), not hyphens, which the API server rejects.
 
 ## Status
 
