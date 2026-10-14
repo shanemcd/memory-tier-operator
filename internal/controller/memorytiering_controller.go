@@ -201,6 +201,7 @@ func (r *MemoryTieringReconciler) ensureDriverDaemonSet(ctx context.Context, mt 
 						Name:            "driver",
 						Image:           image,
 						ImagePullPolicy: corev1.PullAlways,
+						Command:         []string{"/driver"},
 						Args: []string{
 							"-driver-name=" + DriverName,
 							"-dram-pool=" + dramFlag,
