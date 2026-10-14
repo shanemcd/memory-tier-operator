@@ -19,10 +19,11 @@ type MemoryTieringSpec struct {
 	// +optional
 	DriverImage string `json:"driverImage,omitempty"`
 
-	// DRAMPoolSize is the per-node DRAM capacity exposed for claims.
-	// This is the claimable fraction of the node's DRAM, not its total;
-	// size it so that DRAM-only workloads can be packed deliberately.
-	// Default: 2Gi.
+	// DRAMPoolSize sets a per-node placement quota for DRAM-tier
+	// claims. When unset, the driver exposes the node's full DRAM and
+	// the stock scheduler handles capacity (the DRA pool is a placement
+	// gate, not a capacity system). Set it to limit how many DRAM-opted
+	// workloads can pile onto one node.
 	// +optional
 	DRAMPoolSize resource.Quantity `json:"dramPoolSize,omitempty"`
 
