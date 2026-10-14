@@ -79,6 +79,10 @@ func (r *MemoryTieringReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 func (r *MemoryTieringReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&memtirv1.MemoryTiering{}).
+		// Reconcile when managed objects are deleted externally, so the
+		// operator recreates them without waiting for a CR touch.
+		Owns(&resourcev1.DeviceClass{}).
+		Owns(&appsv1.DaemonSet{}).
 		Complete(r)
 }
 
@@ -137,8 +141,10 @@ func (r *MemoryTieringReconciler) ensureDriverRBAC(ctx context.Context) error {
 		return err
 	}
 
-	role := &rbacv1.Role{
-		ObjectMeta: metav1.ObjectMeta{Name: driverName, Namespace: ns},
+	// ResourceSlices are cluster-scoped; the driver needs a ClusterRole
+	// (a namespaced Role cannot list them).
+	role := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: driverName},
 		Rules: []rbacv1.PolicyRule{
 			{APIGroups: []string{"resource.k8s.io"}, Resources: []string{"resourceslices"}, Verbs: []string{"create", "delete", "get", "list", "watch", "patch", "update"}},
 			{APIGroups: []string{"resource.k8s.io"}, Resources: []string{"resourceclaims"}, Verbs: []string{"get", "list", "watch"}},
@@ -147,18 +153,18 @@ func (r *MemoryTieringReconciler) ensureDriverRBAC(ctx context.Context) error {
 		},
 	}
 	if err := r.ensureObject(ctx, role, func() error {
-		return r.Client.Create(ctx, role)
+		return r.Create(ctx, role)
 	}); err != nil {
 		return err
 	}
 
-	rb := &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: driverName, Namespace: ns},
+	rb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: driverName},
 		Subjects:   []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: driverName, Namespace: ns}},
-		RoleRef:   rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "Role", Name: driverName},
+		RoleRef:   rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: driverName},
 	}
 	return r.ensureObject(ctx, rb, func() error {
-		return r.Client.Create(ctx, rb)
+		return r.Create(ctx, rb)
 	})
 }
 
