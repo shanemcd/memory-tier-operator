@@ -13,7 +13,6 @@ import (
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -177,11 +176,10 @@ func (r *MemoryTieringReconciler) ensureDriverDaemonSet(ctx context.Context, mt 
 		image = r.OperatorImage
 	}
 
-	dramPool := mt.Spec.DRAMPoolSize
-	if dramPool.IsZero() {
-		dramPool = resource.MustParse("2Gi")
+	dramFlag := ""
+	if !mt.Spec.DRAMPoolSize.IsZero() {
+		dramFlag = mt.Spec.DRAMPoolSize.String()
 	}
-	dramFlag := dramPool.String()
 
 	cxlFlag := ""
 	if mt.Spec.CXLPoolSize != nil {
@@ -210,7 +208,6 @@ func (r *MemoryTieringReconciler) ensureDriverDaemonSet(ctx context.Context, mt 
 						Command:         []string{"/driver"},
 						Args: []string{
 							"-driver-name=" + DriverName,
-							"-dram-pool=" + dramFlag,
 						},
 						Env: []corev1.EnvVar{{
 							Name: "NODE_NAME",
@@ -234,6 +231,10 @@ func (r *MemoryTieringReconciler) ensureDriverDaemonSet(ctx context.Context, mt 
 				},
 			},
 		},
+	}
+	if dramFlag != "" {
+		desired.Spec.Template.Spec.Containers[0].Args = append(
+			desired.Spec.Template.Spec.Containers[0].Args, "-dram-pool="+dramFlag)
 	}
 	if cxlFlag != "" {
 		desired.Spec.Template.Spec.Containers[0].Args = append(

@@ -29,7 +29,7 @@ spec:
                 description: Overrides the driver daemon image. Defaults to the operator's own image.
               dramPoolSize:
                 type: string
-                description: Per-node DRAM capacity exposed for claims (e.g. "2Gi"). Default 2Gi.
+                description: Per-node placement quota for DRAM-tier claims. Unset = the node's full DRAM (the stock scheduler handles capacity).
               cxlPoolSize:
                 type: string
                 description: Overrides the per-node CXL capacity. Defaults to the full online CXL memory.

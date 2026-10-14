@@ -21,6 +21,8 @@ import (
 type Inventory struct {
 	// DRAMNode is the NUMA node backing the DRAM tier (the lab has one).
 	DRAMNode int
+	// DRAMBytes is the total online memory on the DRAM node.
+	DRAMBytes resource.Quantity
 	// CXLNodes are the CPU-less memory nodes backing the CXL tier.
 	CXLNodes []int
 	// CXLBytes is the total online memory across CXLNodes.
@@ -52,6 +54,11 @@ func Discover() (*Inventory, error) {
 		if hasCPU {
 			if inv.DRAMNode == -1 {
 				inv.DRAMNode = node
+				kb, err := nodeMemTotalKB(node)
+				if err != nil {
+					return nil, err
+				}
+				inv.DRAMBytes = resource.MustParse(fmt.Sprintf("%dKi", kb))
 			}
 			continue
 		}

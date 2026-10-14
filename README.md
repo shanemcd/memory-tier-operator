@@ -134,14 +134,37 @@ node.
 
 ## Design notes
 
+### Capacity accounting: two tiers, two models
+
+The DRAM and CXL tiers use fundamentally different capacity models:
+
+**DRAM tier** — the stock scheduler already tracks DRAM usage via
+`resources.requests.memory` against the node's allocatable. A DRAM-tier
+claim does not replace that accounting; the pod's memory request carries
+the workload's real usage. The DRA claim is a *placement gate* — it
+ensures the pod lands on a node running the memory-tier driver — not a
+capacity system. The driver therefore exposes the node's **full DRAM**
+as the pool by default, and the stock scheduler is the binding
+constraint.
+
+Setting `dramPoolSize` explicitly creates a *placement quota*: it limits
+how many DRAM-opted workloads can pile onto one node, even when DRAM is
+available. This is useful for spreading DRAM-sensitive workloads across
+nodes.
+
+**CXL tier** — CXL memory is on a separate NUMA node that the stock
+scheduler does not count against allocatable. No other system tracks
+it. The DRA pool *is* the capacity accounting for CXL: the driver
+exposes the node's actual CXL capacity, and claims decrement it. The
+pod's memory request carries only the launcher overhead (CPU, page
+tables), not the guest RAM that lives on the CXL node.
+
+### Other implementation notes
+
 - **The reconciler**: the kubelet clears `cpuset.mems` on pod cgroups
   during its own setup, after the DRA prepare call. The driver therefore
   runs a per-claim reconciler that re-writes the mask on drift (a
   one-shot write loses the race — this was verified empirically).
-- **The claim replaces the memory request**: for tiered workloads, the
-  claim's capacity is the scheduling signal; the pod still requests
-  overhead (CPU, ephemeral storage). This avoids double-accounting the
-  memory.
 - **The driver runs privileged**: it needs the kubelet plugin
   directories (registration + checkpoint state) and cgroup write access.
   On OpenShift, grant the `privileged` SCC to the driver's service
