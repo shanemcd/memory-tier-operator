@@ -1,19 +1,10 @@
 # Example MemoryTiering custom resource.
 # Creates the DeviceClasses and deploys the driver DaemonSet.
+# The driver discovers each node's tiers automatically — no pool sizing.
 apiVersion: memorytier.shanemcd.com/v1alpha1
 kind: MemoryTiering
 metadata:
   name: cluster
 spec: {}
-  # All fields are optional:
-  #
-  # dramPoolSize: 4Gi   # optional placement quota for DRAM-tier claims.
-  #                      Unset = the node's full DRAM; the stock scheduler
-  #                      handles capacity, the DRA claim is a placement gate.
-  #
-  # cxlPoolSize: 2Gi    # optional CXL capacity override.
-  #                      Unset = the full online CXL memory.
-  #
-  # nodeSelector: {}    # optional node selector for the driver DaemonSet.
-  #                      Unset = run on all nodes (the driver only publishes
-  #                      tiers where it finds CXL-attached memory).
+  # driverImage: ...    # optional: override the driver daemon image
+  # nodeSelector: {}    # optional: restrict which nodes run the driver

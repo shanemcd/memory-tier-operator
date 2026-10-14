@@ -134,30 +134,23 @@ node.
 
 ## Design notes
 
-### Capacity accounting: two tiers, two models
+### What the tiers do
 
-The DRAM and CXL tiers use fundamentally different capacity models:
+The driver publishes what it finds — no pool sizing, no capacity
+knobs:
 
-**DRAM tier** — the stock scheduler already tracks DRAM usage via
-`resources.requests.memory` against the node's allocatable. A DRAM-tier
-claim does not replace that accounting; the pod's memory request carries
-the workload's real usage. The DRA claim is a *placement gate* — it
-ensures the pod lands on a node running the memory-tier driver — not a
-capacity system. The driver therefore exposes the node's **full DRAM**
-as the pool by default, and the stock scheduler is the binding
-constraint.
+- The **DRAM device** carries the node's full DRAM. The pod's memory
+  request already tracks usage through the stock scheduler; the DRA
+  claim is a placement gate (which nodes run the driver), not a
+  capacity system.
+- The **CXL device** carries the node's full CXL memory. CXL sits on a
+  separate NUMA node that the stock scheduler doesn't count against
+  allocatable, so the DRA pool is its only capacity accounting. Claims
+  decrement it; when it's exhausted, the scheduler stops placing
+  CXL-opted workloads on that node.
 
-Setting `dramPoolSize` explicitly creates a *placement quota*: it limits
-how many DRAM-opted workloads can pile onto one node, even when DRAM is
-available. This is useful for spreading DRAM-sensitive workloads across
-nodes.
-
-**CXL tier** — CXL memory is on a separate NUMA node that the stock
-scheduler does not count against allocatable. No other system tracks
-it. The DRA pool *is* the capacity accounting for CXL: the driver
-exposes the node's actual CXL capacity, and claims decrement it. The
-pod's memory request carries only the launcher overhead (CPU, page
-tables), not the guest RAM that lives on the CXL node.
+The MemoryTiering spec is operational only (`driverImage`,
+`nodeSelector`) — it does not slice or partition memory.
 
 ### Other implementation notes
 
