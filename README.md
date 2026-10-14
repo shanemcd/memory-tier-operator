@@ -111,9 +111,9 @@ For DRAM-only claims: `cpuset.mems` reads `0` (the DRAM NUMA node) and
 
 ## KubeVirt integration
 
-A [KubeVirt fork](https://github.com/shanemcd/kubevirt/tree/memory-tier)
-(branch `memory-tier`) adds a VM-level API so virtual machines can opt
-in without writing claims by hand:
+Virtual machines use the standard DRA `spec.resourceClaims` field —
+**no KubeVirt modifications required**. A VM that wants its memory on
+a specific tier writes a claim reference directly:
 
 ```yaml
 apiVersion: kubevirt.io/v1
@@ -123,14 +123,43 @@ spec:
     spec:
       domain:
         memory:
-          guest: 256Mi
-          tier: DRAM-only   # or CXL-only
+          guest: 512Mi
+      resourceClaims:
+      - name: memory-tier
+        resourceClaimTemplateName: my-vm-cxl-512mi
+      volumes: ...
 ```
 
-virt-controller translates the tier into a ResourceClaimTemplate
-carrying the guest RAM as capacity; the VM schedules only where the
-tier is available, and QEMU's guest memory lands on the promised NUMA
-node.
+The referenced ResourceClaimTemplate is created in the VM's namespace
+(by the user, or by an operator):
+
+```yaml
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: my-vm-cxl-512mi
+spec:
+  spec:
+    devices:
+      requests:
+      - name: memory
+        exactly:
+          deviceClassName: cxl-tier
+          allocationMode: All
+          capacity:
+            requests:
+              memorytier.openshift.io/memory: 512Mi
+```
+
+The scheduler places the VM only on nodes with free CXL capacity, and
+the driver enforces `cpuset.mems` on the virt-launcher pod. QEMU's
+guest memory lands on the promised NUMA node.
+
+A [mutating webhook](internal/webhook/) is included as an optional
+convenience: it translates a `memorytier.shanemcd.com/tier` annotation
+into the appropriate `resourceClaims` entry at admission time, so users
+can write `annotations: {memorytier.shanemcd.com/tier: CXL-only}`
+instead of the claim template by hand.
 
 ## Design notes
 

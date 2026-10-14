@@ -3,6 +3,7 @@
 package main
 
 import (
+	"net/http"
 	"flag"
 	"os"
 
@@ -17,6 +18,7 @@ import (
 
 	memtirv1 "github.com/shanemcd/memory-tier-operator/api/v1alpha1"
 	"github.com/shanemcd/memory-tier-operator/internal/controller"
+	"github.com/shanemcd/memory-tier-operator/internal/webhook"
 )
 
 var scheme = runtime.NewScheme()
@@ -69,6 +71,9 @@ func main() {
 		ctrl.Log.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
+
+	// Register the VMI mutating webhook handler
+	mgr.GetWebhookServer().Register("/mutate-vmi", http.HandlerFunc(webhook.HandleMutate))
 
 	ctrl.Log.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	virtv1 "kubevirt.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	memtirv1 "github.com/shanemcd/memory-tier-operator/api/v1alpha1"
+	"github.com/shanemcd/memory-tier-operator/internal/webhook"
 )
 
 const (
@@ -71,6 +73,23 @@ func (r *MemoryTieringReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, fmt.Errorf("ensure driver daemonset: %w", err)
 	}
 
+	// Ensure claim templates for annotated VMIs (the controller's
+	// periodic resync picks these up; no VMI watch needed for the
+	// prototype)
+	templater := &webhook.ClaimTemplater{Client: r.Client, Scheme: r.Scheme}
+	vmis := &virtv1.VirtualMachineInstanceList{}
+	if err := r.List(ctx, vmis, client.InNamespace("")); err == nil {
+		for i := range vmis.Items {
+			vmi := &vmis.Items[i]
+			if vmi.Annotations[webhook.TierAnnotation] == "" {
+				continue
+			}
+			if err := templater.EnsureVMIClaimTemplate(ctx, vmi); err != nil {
+				logger.Error(err, "failed to ensure claim template", "vmi", vmi.Name)
+			}
+		}
+	}
+
 	logger.Info("reconciled", "name", mt.Name)
 	return ctrl.Result{}, nil
 }
@@ -82,8 +101,10 @@ func (r *MemoryTieringReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// operator recreates them without waiting for a CR touch.
 		Owns(&resourcev1.DeviceClass{}).
 		Owns(&appsv1.DaemonSet{}).
+
 		Complete(r)
 }
+
 
 // ensureDeviceClasses creates the tier vocabulary: dram-tier and cxl-tier
 // DeviceClasses selecting on the driver's `type` attribute.
