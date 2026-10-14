@@ -105,7 +105,7 @@ func main() {
 			if *cxlPool != "" {
 				cxlQty = resource.MustParse(*cxlPool)
 			}
-			effectiveDram := resource.MustParse(*dramPool)
+			var effectiveDram resource.Quantity
 			if dramPoolAuto {
 				// Auto: expose the node's full DRAM. The pod's memory
 				// request already carries the workload's usage through
@@ -113,6 +113,8 @@ func main() {
 				// placement gate (which nodes have the driver), not as
 				// a capacity constraint.
 				effectiveDram = inv.DRAMBytes
+			} else {
+				effectiveDram = resource.MustParse(*dramPool)
 			}
 			res := desiredResources(nodeName, inv, effectiveDram, cxlQty)
 			rsController.Update(res)
