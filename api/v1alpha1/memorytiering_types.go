@@ -8,7 +8,6 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // MemoryTieringSpec configures the memory tiering deployment.
@@ -18,20 +17,6 @@ type MemoryTieringSpec struct {
 	// `driver` entrypoint.
 	// +optional
 	DriverImage string `json:"driverImage,omitempty"`
-
-	// DRAMPoolSize sets a per-node placement quota for DRAM-tier
-	// claims. When unset, the driver exposes the node's full DRAM and
-	// the stock scheduler handles capacity (the DRA pool is a placement
-	// gate, not a capacity system). Set it to limit how many DRAM-opted
-	// workloads can pile onto one node.
-	// +optional
-	DRAMPoolSize resource.Quantity `json:"dramPoolSize,omitempty"`
-
-	// CXLPoolSize overrides the per-node CXL capacity exposed for
-	// claims. When unset, the full online CXL memory of the node is
-	// exposed.
-	// +optional
-	CXLPoolSize *resource.Quantity `json:"cxlPoolSize,omitempty"`
 
 	// NodeSelector selects which nodes run the driver daemon. Only
 	// matching nodes with CXL-attached memory will publish tiers.

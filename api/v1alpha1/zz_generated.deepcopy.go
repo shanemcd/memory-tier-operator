@@ -3,19 +3,12 @@
 package v1alpha1
 
 import (
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
 func (in *MemoryTieringSpec) DeepCopyInto(out *MemoryTieringSpec) {
 	*out = *in
-	out.DRAMPoolSize = in.DRAMPoolSize.DeepCopy()
-	if in.CXLPoolSize != nil {
-		in, out := &in.CXLPoolSize, &out.CXLPoolSize
-		*out = new(resource.Quantity)
-		(*in).DeepCopyInto(*out)
-	}
 	if in.NodeSelector != nil {
 		in, out := &in.NodeSelector, &out.NodeSelector
 		*out = make(map[string]string, len(*in))

@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -40,8 +39,6 @@ const (
 
 func main() {
 	driverName := flag.String("driver-name", defaultDriver, "DRA driver name")
-	dramPool := flag.String("dram-pool", "auto", "DRAM pool: a quantity (e.g. 2Gi) for a placement quota, or auto for the full node DRAM")
-	cxlPool := flag.String("cxl-pool", "", "CXL tier pool size (default: the full online CXL memory)")
 	resync := flag.Duration("resync", 30*time.Second, "topology resync interval")
 	flag.Parse()
 
@@ -90,7 +87,6 @@ func main() {
 
 	// Discovery loop: refresh the desired resources on every tick and on
 	// start; the controller reconciles only on change.
-	dramPoolAuto := *dramPool == "auto" || *dramPool == ""
 	// Shared device topology: device name -> NUMA node, maintained by the
 	// discovery loop and consumed by the enforcement path.
 	deviceNodes := map[string]int{}
@@ -101,22 +97,7 @@ func main() {
 				logger.Error(err, "discovery failed; keeping last published resources")
 				return
 			}
-			cxlQty := inv.CXLBytes
-			if *cxlPool != "" {
-				cxlQty = resource.MustParse(*cxlPool)
-			}
-			var effectiveDram resource.Quantity
-			if dramPoolAuto {
-				// Auto: expose the node's full DRAM. The pod's memory
-				// request already carries the workload's usage through
-				// the stock scheduler, so the DRA pool serves only as a
-				// placement gate (which nodes have the driver), not as
-				// a capacity constraint.
-				effectiveDram = inv.DRAMBytes
-			} else {
-				effectiveDram = resource.MustParse(*dramPool)
-			}
-			res := desiredResources(nodeName, inv, effectiveDram, cxlQty)
+			res := desiredResources(nodeName, inv)
 			rsController.Update(res)
 			// Keep the enforcement map in step with what we publish.
 			deviceNodes["dram-0"] = inv.DRAMNode
@@ -127,9 +108,8 @@ func main() {
 			logger.Info("topology published",
 				"dramNode", inv.DRAMNode,
 				"cxlNodes", inv.CXLNodes,
-				"dramPool", effectiveDram.String(),
-				"dramPoolMode", map[bool]string{true: "auto", false: "explicit"}[dramPoolAuto],
-				"cxlPool", cxlQty.String(),
+				"dramBytes", inv.DRAMBytes.String(),
+				"cxlBytes", inv.CXLBytes.String(),
 				"cxlCommitted", inv.CXLCommitted,
 			)
 		}
@@ -172,8 +152,10 @@ func main() {
 }
 
 // desiredResources turns the inventory into the published pools: one pool
-// per node, one device per tier.
-func desiredResources(nodeName string, inv *discovery.Inventory, dramPool, cxlPool resource.Quantity) *resourceslice.DriverResources {
+// per node, one device per tier. The DRAM device carries the node's full
+// DRAM (the stock scheduler handles capacity); the CXL device carries the
+// node's full CXL memory (the DRA pool is its only capacity accounting).
+func desiredResources(nodeName string, inv *discovery.Inventory) *resourceslice.DriverResources {
 	devices := []resourceapi.Device{
 		{
 			Name: "dram-0",
@@ -182,7 +164,7 @@ func desiredResources(nodeName string, inv *discovery.Inventory, dramPool, cxlPo
 				attrNumaNode: {IntValue: ptr.To(int64(inv.DRAMNode))},
 			},
 			Capacity: map[resourceapi.QualifiedName]resourceapi.DeviceCapacity{
-				attrMemory: {Value: dramPool},
+				attrMemory: {Value: inv.DRAMBytes},
 			},
 			AllowMultipleAllocations: ptr.To(true),
 		},
@@ -198,7 +180,7 @@ func desiredResources(nodeName string, inv *discovery.Inventory, dramPool, cxlPo
 				attrNumaNode: {IntValue: ptr.To(int64(cxlNode))},
 			},
 			Capacity: map[resourceapi.QualifiedName]resourceapi.DeviceCapacity{
-				attrMemory: {Value: cxlPool},
+				attrMemory: {Value: inv.CXLBytes},
 			},
 			AllowMultipleAllocations: ptr.To(true),
 		})

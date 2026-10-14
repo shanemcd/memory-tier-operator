@@ -26,14 +26,7 @@ spec:
             properties:
               driverImage:
                 type: string
-                description: Overrides the driver daemon image. Defaults to the operator's own image.
-              dramPoolSize:
-                type: string
-                description: Per-node placement quota for DRAM-tier claims. Unset = the node's full DRAM (the stock scheduler handles capacity).
-              cxlPoolSize:
-                type: string
-                description: Overrides the per-node CXL capacity. Defaults to the full online CXL memory.
-              nodeSelector:
+                description: Overrides the driver daemon image. Defaults to the operator's own image.              nodeSelector:
                 type: object
                 additionalProperties:
                   type: string

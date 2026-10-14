@@ -176,16 +176,6 @@ func (r *MemoryTieringReconciler) ensureDriverDaemonSet(ctx context.Context, mt 
 		image = r.OperatorImage
 	}
 
-	dramFlag := ""
-	if !mt.Spec.DRAMPoolSize.IsZero() {
-		dramFlag = mt.Spec.DRAMPoolSize.String()
-	}
-
-	cxlFlag := ""
-	if mt.Spec.CXLPoolSize != nil {
-		cxlFlag = mt.Spec.CXLPoolSize.String()
-	}
-
 	nodeSelector := map[string]string{}
 	for k, v := range mt.Spec.NodeSelector {
 		nodeSelector[k] = v
@@ -232,15 +222,6 @@ func (r *MemoryTieringReconciler) ensureDriverDaemonSet(ctx context.Context, mt 
 			},
 		},
 	}
-	if dramFlag != "" {
-		desired.Spec.Template.Spec.Containers[0].Args = append(
-			desired.Spec.Template.Spec.Containers[0].Args, "-dram-pool="+dramFlag)
-	}
-	if cxlFlag != "" {
-		desired.Spec.Template.Spec.Containers[0].Args = append(
-			desired.Spec.Template.Spec.Containers[0].Args, "-cxl-pool="+cxlFlag)
-	}
-
 	existing := &appsv1.DaemonSet{}
 	if err := r.Get(ctx, types.NamespacedName{Name: driverName, Namespace: ns}, existing); err != nil {
 		if !errors.IsNotFound(err) {
