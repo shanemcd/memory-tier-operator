@@ -1,0 +1,87 @@
+# Install: the operator Deployment, RBAC, CRD, and namespace.
+# After applying, create a MemoryTiering CR (see deploy/example.yaml)
+# to start the driver on nodes with CXL-attached memory.
+#
+#   kubectl apply -f deploy/install.yaml
+#   kubectl apply -f deploy/example.yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubevirt-mt
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: memory-tier-operator
+  namespace: kubevirt-mt
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: memory-tier-operator
+rules:
+- apiGroups: ["memorytier.shanemcd.com"]
+  resources: ["memorytierings"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["memorytier.shanemcd.com"]
+  resources: ["memorytierings/status"]
+  verbs: ["get", "update", "patch"]
+- apiGroups: ["apps"]
+  resources: ["daemonsets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["resource.k8s.io"]
+  resources: ["deviceclasses"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+- apiGroups: ["resource.k8s.io"]
+  resources: ["resourceslices", "resourceclaims"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["serviceaccounts"]
+  verbs: ["get", "list", "watch", "create", "update"]
+- apiGroups: [""]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["roles", "rolebindings"]
+  verbs: ["get", "list", "watch", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: memory-tier-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: memory-tier-operator
+subjects:
+- kind: ServiceAccount
+  name: memory-tier-operator
+  namespace: kubevirt-mt
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memory-tier-operator
+  namespace: kubevirt-mt
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: memory-tier-operator}
+  template:
+    metadata:
+      labels: {app: memory-tier-operator}
+    spec:
+      serviceAccountName: memory-tier-operator
+      containers:
+      - name: operator
+        image: ghcr.io/shanemcd/memory-tier-operator:latest
+        imagePullPolicy: Always
+        args: ["-operator-image=ghcr.io/shanemcd/memory-tier-operator:latest"]
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
