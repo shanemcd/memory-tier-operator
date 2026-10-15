@@ -72,8 +72,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Register the VMI mutating webhook handler
-	mgr.GetWebhookServer().Register("/mutate-vmi", http.HandlerFunc(webhook.HandleMutate))
+	// Register the VMI mutating webhook handler. The webhook is optional:
+	// without TLS certs (no MutatingWebhookConfiguration deployed) the
+	// server would fail manager start, so only register when the cert
+	// exists. The tier system works without it — VMs reference claims
+	// directly via spec.resourceClaims.
+	if _, err := os.Stat("/tmp/k8s-webhook-server/serving-certs/tls.crt"); err == nil {
+		mgr.GetWebhookServer().Register("/mutate-vmi", http.HandlerFunc(webhook.HandleMutate))
+		ctrl.Log.Info("VMI mutating webhook registered", "path", "/mutate-vmi")
+	} else {
+		ctrl.Log.Info("webhook certs not found — VMI mutating webhook disabled (VMs use spec.resourceClaims directly)")
+	}
 
 	ctrl.Log.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
