@@ -233,15 +233,16 @@ A per-node DaemonSet that:
 The `tiered` device is published only on nodes with a CXL tier, so
 tiered claims cannot schedule on DRAM-only nodes.
 
-### What is deliberately not here
+### Scope
 
-- No webhook, annotation, or secondary API — `spec.resourceClaims`
-  is the one way to express tier intent
-- No userspace page-migration daemon — the kernel's own reclaim and
-  demotion machinery handles runtime placement
-- No per-VM runtime floor — `memory.min` does not provide one (see
-  kernel facts), and a daemon-based controller was evaluated and
-  rejected on performance grounds elsewhere
+The system has three moving parts: the operator (reconciles classes
+and the DaemonSet), the driver (discovers topology, publishes slices,
+writes one cgroup file per claim), and the scheduler's in-tree DRA
+evaluation. `spec.resourceClaims` is the only API surface. Runtime
+page placement is entirely the kernel's — no userspace component
+moves pages, and no per-VM runtime percentage floor is offered (no
+standing kernel mechanism provides one; see the kernel-facts section
+for what was measured).
 
 ## Status
 
