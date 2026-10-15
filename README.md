@@ -156,6 +156,25 @@ mempolicy settings"), so genuinely cold pages of any workload can
 move. What is guaranteed is the part that matters for latency: pages
 being touched stay on DRAM.
 
+Measured, the per-VM policy matrix is:
+
+| Mechanism | Gates allocation | Gates demotion |
+|---|---|---|
+| `cpuset.mems` | yes (birth node, fallback) | no — ignored by design |
+| `memory.min` | no | no — protection is charge-based, demotion is charge-neutral |
+| `mlock` (unevictable) | no | **yes — a hard wall** (never enters the reclaim scan) |
+| `numa_demotion_enabled=false` | no | yes, but host-wide |
+
+`memory.min` looks like it should floor residency and doesn't: a
+cgroup's usage stays charged wherever its pages live, so it never
+registers as "below min" and the reclaim scan walks through the floor
+(measured under both direct reclaim and node pressure). `mlock` is the
+real wall — a 600 MiB locked allocation held completely still on DRAM
+under pressure that demoted 4.4 GiB across the node — but it is binary
+per allocation, so it gives you tier-100, not a ratio. For VMs it maps
+to QEMU's locked memory backing (a small KubeVirt API addition; not
+exposed today) or hugepages (supported natively).
+
 ### Tiered claims
 
 The `tiered` class spans both nodes: the claim is a DRAM hot-set
