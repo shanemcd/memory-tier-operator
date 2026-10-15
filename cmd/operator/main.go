@@ -3,9 +3,8 @@
 package main
 
 import (
-	"net/http"
-	"flag"
 	"os"
+	"flag"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -18,7 +17,6 @@ import (
 
 	memtirv1 "github.com/shanemcd/memory-tier-operator/api/v1alpha1"
 	"github.com/shanemcd/memory-tier-operator/internal/controller"
-	"github.com/shanemcd/memory-tier-operator/internal/webhook"
 )
 
 var scheme = runtime.NewScheme()
@@ -70,18 +68,6 @@ func main() {
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		ctrl.Log.Error(err, "unable to set up ready check")
 		os.Exit(1)
-	}
-
-	// Register the VMI mutating webhook handler. The webhook is optional:
-	// without TLS certs (no MutatingWebhookConfiguration deployed) the
-	// server would fail manager start, so only register when the cert
-	// exists. The tier system works without it — VMs reference claims
-	// directly via spec.resourceClaims.
-	if _, err := os.Stat("/tmp/k8s-webhook-server/serving-certs/tls.crt"); err == nil {
-		mgr.GetWebhookServer().Register("/mutate-vmi", http.HandlerFunc(webhook.HandleMutate))
-		ctrl.Log.Info("VMI mutating webhook registered", "path", "/mutate-vmi")
-	} else {
-		ctrl.Log.Info("webhook certs not found — VMI mutating webhook disabled (VMs use spec.resourceClaims directly)")
 	}
 
 	ctrl.Log.Info("starting manager")
