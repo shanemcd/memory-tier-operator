@@ -191,11 +191,8 @@ The scheduler places the VM only on nodes with free CXL capacity, and
 the driver enforces `cpuset.mems` on the virt-launcher pod. QEMU's
 guest memory lands on the promised NUMA node.
 
-A [mutating webhook](internal/webhook/) is included as an optional
-convenience: it translates a `memorytier.shanemcd.com/tier` annotation
-into the appropriate `resourceClaims` entry at admission time, so users
-can write `annotations: {memorytier.shanemcd.com/tier: CXL-only}`
-instead of the claim template by hand.
+There is deliberately no annotation, webhook, or other secondary API:
+`spec.resourceClaims` is the one way to express tier intent.
 
 ## Design notes
 
