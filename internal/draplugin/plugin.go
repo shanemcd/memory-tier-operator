@@ -50,9 +50,10 @@ type Plugin struct {
 	NodeName string
 	Client   kubernetes.Interface
 
-	// DeviceNodes maps published device names to their NUMA node
-	// (maintained by the discovery loop; e.g. "dram-0" -> 0, "cxl-0" -> 1).
-	DeviceNodes map[string]int
+	// DeviceNodes maps published device names to their NUMA nodes —
+	// multi-node for tiered devices (maintained by the discovery loop;
+	// e.g. "dram-0" -> {0}, "cxl-0" -> {1}, "tiered-0" -> {0,1}).
+	DeviceNodes map[string][]int
 
 	mu       sync.Mutex
 	Prepared map[types.UID]*PreparedInfo
@@ -72,11 +73,12 @@ func (p *Plugin) PrepareResourceClaims(ctx context.Context, claims []*resourceap
 	for _, claim := range claims {
 		result := kubeletplugin.PrepareResult{Devices: []kubeletplugin.Device{}}
 
-		// Union of NUMA nodes across the claim's allocated devices.
+		// Union of NUMA nodes across the claim's allocated devices
+		// (a tiered device contributes both of its nodes).
 		nodes := []int{}
 		for _, res := range claim.Status.Allocation.Devices.Results {
-			if node, ok := p.DeviceNodes[res.Device]; ok {
-				nodes = append(nodes, node)
+			if devNodes, ok := p.DeviceNodes[res.Device]; ok {
+				nodes = append(nodes, devNodes...)
 			} else {
 				logger.Info("allocated device not in published topology", "device", res.Device)
 			}
@@ -220,9 +222,9 @@ func (p *Plugin) reconcileMask(claimUID types.UID, info *PreparedInfo) {
 
 // fullMask returns "0-1"-style mask over all known nodes.
 func (p *Plugin) fullMask() string {
-	nodes := make([]int, 0, len(p.DeviceNodes))
-	for _, n := range p.DeviceNodes {
-		nodes = append(nodes, n)
+	nodes := make([]int, 0, len(p.DeviceNodes)*2)
+	for _, ns := range p.DeviceNodes {
+		nodes = append(nodes, ns...)
 	}
 	return nodesToMask(nodes)
 }
@@ -265,9 +267,23 @@ func nodesToMask(nodes []int) string {
 		sorted = append(sorted, n)
 	}
 	sort.Ints(sorted)
-	parts := make([]string, len(sorted))
-	for i, n := range sorted {
-		parts[i] = strconv.Itoa(n)
+	// Contiguous spans compress to ranges so the written mask matches
+	// the kernel's readback format exactly (the reconciler compares
+	// verbatim; "0,1" would read back "0-1" and fight itself).
+	var parts []string
+	for i := 0; i < len(sorted); {
+		start := sorted[i]
+		end := start
+		for i+1 < len(sorted) && sorted[i+1] == end+1 {
+			i++
+			end = sorted[i]
+		}
+		if start == end {
+			parts = append(parts, strconv.Itoa(start))
+		} else {
+			parts = append(parts, fmt.Sprintf("%d-%d", start, end))
+		}
+		i++
 	}
 	return strings.Join(parts, ",")
 }

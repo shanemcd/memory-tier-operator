@@ -51,7 +51,7 @@ kubectl apply -f deploy/install.yaml
 kubectl apply -f deploy/example.yaml
 ```
 
-The operator creates the `dram-tier` and `cxl-tier` DeviceClasses and
+The operator creates the `dram-tier`, `cxl-tier`, and `tiered` DeviceClasses and
 the driver DaemonSet. On nodes with CXL memory, you should see a
 ResourceSlice appear:
 
@@ -108,6 +108,42 @@ grep anon /sys/fs/cgroup/kubepods.slice/*/kubepods-*pod<uid>.slice/memory.numa_s
 
 For DRAM-only claims: `cpuset.mems` reads `0` (the DRAM NUMA node) and
 `anon N0=<size> N1=0`. For CXL-only: mask `1`, pages on node 1.
+
+### Tiered claims
+
+The `tiered` class spans both nodes: the claim is a DRAM hot-set
+budget, the enforcement mask covers DRAM **and** CXL, and the kernel
+demotes cold pages to the CXL node under memory pressure while hot
+pages stay on DRAM:
+
+```yaml
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: tiered-worker-memory
+spec:
+  spec:
+    devices:
+      requests:
+      - name: memory
+        exactly:
+          deviceClassName: tiered
+          allocationMode: All
+          capacity:
+            requests:
+              memorytier.openshift.io/memory: 1Gi    # the hot-set bound
+```
+
+The tiered device is published only on nodes with a CXL tier, so
+tiered claims cannot land on DRAM-only nodes. Size the claim for the
+hot set, not the peak: the workload's cold tail spills into the CXL
+demotion pool automatically. DRAM-only claims remain structurally
+protected — a page can only demote within its cgroup's allowed nodes,
+so a `mems=0` pod never leaks onto CXL.
+
+The driver enables the kernel's demotion path
+(`/sys/kernel/mm/numa/demotion_enabled`) on CXL-capable nodes at
+startup — it ships disabled by default.
 
 ## KubeVirt integration
 
@@ -204,10 +240,17 @@ Alpha. Developed and verified against QEMU-emulated CXL Type-3 devices
 KubeVirt integration have been verified end-to-end: DRAM-only and
 CXL-only pods and VMs place their memory on the promised tier, the
 placement holds under memory pressure, and pool exhaustion correctly
-blocks scheduling without substitution.
+blocks scheduling without substitution. Tiered claims have been
+verified at the VM level: a tiered VM's cold guest RAM demotes to the
+CXL node under reclaim while a DRAM-only VM on the same node under
+the same pressure keeps its memory on DRAM.
 
-Not yet implemented: `tiered` (union-mask) claims, live migration of
-tier intent, metrics/alerts, and OLM packaging.
+Known limitation: a pod's first page faults can land on the CXL node
+(before the enforcement mask is applied, under full DRAM pressure) —
+bounded by the early-boot footprint.
+
+Not yet implemented: live migration of tier intent, metrics/alerts,
+and OLM packaging.
 
 ## License
 

@@ -106,8 +106,11 @@ func (r *MemoryTieringReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 
-// ensureDeviceClasses creates the tier vocabulary: dram-tier and cxl-tier
-// DeviceClasses selecting on the driver's `type` attribute.
+// ensureDeviceClasses creates the tier vocabulary: dram-tier, cxl-tier,
+// and tiered DeviceClasses selecting on the driver's `type` attribute.
+// The tiered class matches the union device (published only on nodes
+// with a CXL demotion target), so tiered claims cannot land on
+// DRAM-only nodes.
 func (r *MemoryTieringReconciler) ensureDeviceClasses(ctx context.Context) error {
 	for _, tier := range []struct {
 		name string
@@ -115,6 +118,7 @@ func (r *MemoryTieringReconciler) ensureDeviceClasses(ctx context.Context) error
 	}{
 		{"dram-tier", "dram"},
 		{"cxl-tier", "cxl"},
+		{"tiered", "tiered"},
 	} {
 		desired := &resourcev1.DeviceClass{
 			ObjectMeta: metav1.ObjectMeta{Name: tier.name},
