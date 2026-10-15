@@ -109,6 +109,53 @@ grep anon /sys/fs/cgroup/kubepods.slice/*/kubepods-*pod<uid>.slice/memory.numa_s
 For DRAM-only claims: `cpuset.mems` reads `0` (the DRAM NUMA node) and
 `anon N0=<size> N1=0`. For CXL-only: mask `1`, pages on node 1.
 
+### The ratio view (how much of a VM's memory is fast?)
+
+The three classes answer one question with increasing strictness —
+"what fraction of this workload's memory must be on fast memory?" —
+and the honest answer comes in two layers:
+
+- **The claim** is admission control and allocation policy: how much
+  DRAM hot-set budget you are entitled to, and where new pages may be
+  born.
+- **The kernel** decides the actual split, by real access behavior:
+  hot pages stay on DRAM, cold pages demote to CXL under memory
+  pressure. This layer is global — it applies to every workload on
+  the node, claimed or not.
+
+Measured on the lab (a 2 GiB Fedora VM whose guest workload holds a
+120 MiB hot set and a 480 MiB cold tail, claimed as `tiered`):
+
+```sh
+# One bounded reclaim on the virt-launcher cgroup demotes the cold
+# tail; the kernel stops at the requested amount.
+echo 800M > /sys/fs/cgroup/.../virt-launcher-.../memory.reclaim
+grep anon .../memory.numa_stat
+# round 1: anon N0=462MiB N1=796MiB   (63% on CXL)
+# round 2: anon N0=162MiB N1=1097MiB  (87% on CXL — the cold tail)
+```
+
+The DRAM floor converged to the actual hot set (162 MiB ≈ the 120 MiB
+hot loop plus a minimal active set) while the guest kept running
+normally. The ratio is therefore *dialable by pressure* and *bounded
+by behavior*: a workload with a 20% hot set ends up ~80% on CXL, which
+is the point — DRAM hosts hot sets, CXL absorbs cold tails.
+
+Mapping the ratio vocabulary onto the classes:
+
+| Ratio intent | Class | What you actually get |
+|---|---|---|
+| 100% fast | `dram-tier` | Pages are *born* on DRAM and hot pages *stay* there; cold pages may still be demoted by the kernel (there is no per-workload migration fence) |
+| N% fast (0<N<100) | `tiered`, claim = N% of guest RAM | A DRAM hot-set reservation (admission) plus allocation fallback; the kernel keeps the hot set on DRAM and spills the cold tail |
+| Don't care | no claim at all | DRAM-first allocation by default, cold tail demotes anyway — the default behavior needs no API (measured: 84% of an unclaimed VM's cold memory demoted) |
+
+The one thing no class can promise is a *hard* per-workload floor on
+DRAM residency for cold pages: the kernel's demotion path explicitly
+ignores cgroup cpusets (mm/vmscan.c: "Demotion ignores all cpuset and
+mempolicy settings"), so genuinely cold pages of any workload can
+move. What is guaranteed is the part that matters for latency: pages
+being touched stay on DRAM.
+
 ### Tiered claims
 
 The `tiered` class spans both nodes: the claim is a DRAM hot-set
