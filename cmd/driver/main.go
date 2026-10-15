@@ -9,8 +9,10 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -32,6 +34,7 @@ const (
 	attrDomain     = "memorytier.openshift.io"
 	attrType       = attrDomain + "/type"
 	attrNumaNode   = attrDomain + "/numa_node"
+	attrDemoteNode = attrDomain + "/demote_node"
 	attrMemory     = attrDomain + "/memory"
 	defaultDriver  = "memorytier.openshift.io"
 	pluginDataRoot = "/var/lib/kubelet/plugins"
@@ -87,9 +90,10 @@ func main() {
 
 	// Discovery loop: refresh the desired resources on every tick and on
 	// start; the controller reconciles only on change.
-	// Shared device topology: device name -> NUMA node, maintained by the
-	// discovery loop and consumed by the enforcement path.
-	deviceNodes := map[string]int{}
+	// Shared device topology: device name -> NUMA nodes (multi-node for
+	// tiered devices), maintained by the discovery loop and consumed by
+	// the enforcement path.
+	deviceNodes := map[string][]int{}
 	go func() {
 		update := func() {
 			inv, err := discovery.Discover()
@@ -100,10 +104,20 @@ func main() {
 			res := desiredResources(nodeName, inv)
 			rsController.Update(res)
 			// Keep the enforcement map in step with what we publish.
-			deviceNodes["dram-0"] = inv.DRAMNode
+			deviceNodes["dram-0"] = []int{inv.DRAMNode}
 			delete(deviceNodes, "cxl-0")
+			delete(deviceNodes, "tiered-0")
 			if len(inv.CXLNodes) > 0 {
-				deviceNodes["cxl-0"] = inv.CXLNodes[0]
+				deviceNodes["cxl-0"] = []int{inv.CXLNodes[0]}
+				// Tiered: the union device spans the DRAM node (hot set,
+				// first-touch) and the CXL node (demotion target).
+				deviceNodes["tiered-0"] = []int{inv.DRAMNode, inv.CXLNodes[0]}
+				// The kernel's demotion path ships disabled on RHEL
+				// (numa_demotion_enabled=false); a node with a CXL tier
+				// wants it on. Idempotent.
+				if err := ensureDemotionEnabled(); err != nil {
+					logger.Error(err, "enabling kernel demotion failed")
+				}
 			}
 			logger.Info("topology published",
 				"dramNode", inv.DRAMNode,
@@ -154,7 +168,11 @@ func main() {
 // desiredResources turns the inventory into the published pools: one pool
 // per node, one device per tier. The DRAM device carries the node's full
 // DRAM (the stock scheduler handles capacity); the CXL device carries the
-// node's full CXL memory (the DRA pool is its only capacity accounting).
+// node's full CXL memory (the DRA pool is its only capacity accounting);
+// the tiered device (published only where a CXL tier exists) carries the
+// DRAM bytes as its hot-set ledger — the claim is a placement gate, the
+// stock scheduler binds actual usage, and the kernel demotes the cold
+// tail into the CXL node.
 func desiredResources(nodeName string, inv *discovery.Inventory) *resourceslice.DriverResources {
 	devices := []resourceapi.Device{
 		{
@@ -184,6 +202,22 @@ func desiredResources(nodeName string, inv *discovery.Inventory) *resourceslice.
 			},
 			AllowMultipleAllocations: ptr.To(true),
 		})
+		// Tiered: spans the DRAM node (hot set) and the CXL node (demotion
+		// target). Capacity is the DRAM pool — the hot-set bound. Published
+		// only where a demotion target exists, so the scheduler cannot
+		// place tiered claims on DRAM-only nodes.
+		devices = append(devices, resourceapi.Device{
+			Name: "tiered-0",
+			Attributes: map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
+				attrType:       {StringValue: ptr.To("tiered")},
+				attrNumaNode:   {IntValue: ptr.To(int64(inv.DRAMNode))},
+				attrDemoteNode: {IntValue: ptr.To(int64(cxlNode))},
+			},
+			Capacity: map[resourceapi.QualifiedName]resourceapi.DeviceCapacity{
+				attrMemory: {Value: inv.DRAMBytes},
+			},
+			AllowMultipleAllocations: ptr.To(true),
+		})
 	}
 	return &resourceslice.DriverResources{
 		Pools: map[string]resourceslice.Pool{
@@ -192,4 +226,19 @@ func desiredResources(nodeName string, inv *discovery.Inventory) *resourceslice.
 			},
 		},
 	}
+}
+
+// ensureDemotionEnabled turns on the kernel's demotion path. RHEL ships
+// numa_demotion_enabled=false; without it, reclaim swaps-or-nothing and
+// the tiered mask never spills cold pages to the CXL node.
+func ensureDemotionEnabled() error {
+	path := "/sys/kernel/mm/numa/demotion_enabled"
+	cur, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	if strings.TrimSpace(string(cur)) == "true" {
+		return nil
+	}
+	return os.WriteFile(path, []byte("true"), 0o644)
 }
