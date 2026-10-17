@@ -1,0 +1,49 @@
+# Example administrator-defined memory policy classes.
+#
+# Prerequisites the administrator owns (see docs/memory-policy-classes.md):
+#   - Memory Manager Static with reservedMemory declared for the DRAM
+#     NUMA node only (structural DRAM placement for Guaranteed pods)
+#   - For Hugepages-backed classes: the node's 2Mi hugepage pool
+---
+apiVersion: memorytier.shanemcd.com/v1alpha1
+kind: MemoryPolicy
+metadata:
+  name: gold-hp
+spec:
+  mode: DRAMOnly
+  backing:
+    type: Hugepages
+    hugepageSize: 2Mi
+  # cluster default: workloads selecting nothing get this class
+  default: true
+  selection:
+    namespaceRules:
+      # sandbox namespaces may not use the premium class
+      - namespace: sandbox
+        forbidden: [gold-hp, gold-lock]
+      # tenants namespace: only the tiered class is permitted
+      - namespace: tenants
+        allowed: [tiered]
+      # prod: everyone gets gold-hp whether they like it or not
+      - namespace: prod
+        forced: gold-hp
+---
+apiVersion: memorytier.shanemcd.com/v1alpha1
+kind: MemoryPolicy
+metadata:
+  name: gold-lock
+spec:
+  # The other side of the open backing decision: same DRAM-only
+  # guarantee via memory locking instead of a hugepage pool (no
+  # boot-time partition; no scheduler-visible accounting).
+  mode: DRAMOnly
+  backing:
+    type: MemLock
+---
+apiVersion: memorytier.shanemcd.com/v1alpha1
+kind: MemoryPolicy
+metadata:
+  name: tiered
+spec:
+  # The opt-out baseline: kernel demotion, no mechanism rendered.
+  mode: Tiered

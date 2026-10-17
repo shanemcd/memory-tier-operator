@@ -1,0 +1,56 @@
+# Demo pair: the same VM shape under the two modes.
+#
+# The workload-facing surface is ONE annotation. The class carries the
+# mechanism; the user expresses need, not implementation.
+---
+# DRAM-only: renders requests==limits (Guaranteed; the Memory Manager
+# then places the pod on the reservedMemory-declared DRAM node) plus
+# the class backing (here: hugepages-2Mi).
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: demo-dram-only
+spec:
+  running: true
+  template:
+    metadata:
+      annotations:
+        memorytiering.shanemcd.com/policy-class: gold-hp
+    spec:
+      domain:
+        memory:
+          guest: 1Gi
+        disks:
+          - name: rootdisk
+            disk: {}
+      volumes:
+        - name: rootdisk
+          containerDisk:
+            image: quay.io/containerdisks/fedora:latest
+---
+# Tiered: renders NOTHING on the spec — the kernel's demotion is the
+# mechanism — and records the decision on annotations for
+# observability. (With the example classes, omitting the annotation
+# entirely also resolves to the cluster default; the annotation here
+# is explicit for the demo.)
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: demo-tiered
+spec:
+  running: true
+  template:
+    metadata:
+      annotations:
+        memorytiering.shanemcd.com/policy-class: tiered
+    spec:
+      domain:
+        memory:
+          guest: 1Gi
+        disks:
+          - name: rootdisk
+            disk: {}
+      volumes:
+        - name: rootdisk
+          containerDisk:
+            image: quay.io/containerdisks/fedora:latest
