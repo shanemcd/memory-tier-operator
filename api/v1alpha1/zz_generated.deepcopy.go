@@ -78,3 +78,167 @@ func (in *MemoryTieringList) DeepCopy() *MemoryTieringList {
 	in.DeepCopyInto(out)
 	return out
 }
+
+// The following DeepCopy methods for the MemoryPolicy types are
+// hand-maintained on the memory-policy-classes branch (controller-gen
+// is not part of this checkout's toolchain). Keep in sync with
+// memorypolicy_types.go.
+
+// DeepCopyInto copies all properties into another DRAMBacking.
+func (in *DRAMBacking) DeepCopyInto(out *DRAMBacking) {
+	*out = *in
+	if in.HugepageSize != nil {
+		in, out := &in.HugepageSize, &out.HugepageSize
+		x := (*in).DeepCopy()
+		*out = &x
+	}
+}
+
+// DeepCopy copies all properties into another DRAMBacking.
+func (in *DRAMBacking) DeepCopy() *DRAMBacking {
+	if in == nil {
+		return nil
+	}
+	out := new(DRAMBacking)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties into another NamespaceRule.
+func (in *NamespaceRule) DeepCopyInto(out *NamespaceRule) {
+	*out = *in
+	if in.Allowed != nil {
+		in, out := &in.Allowed, &out.Allowed
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Forbidden != nil {
+		in, out := &in.Forbidden, &out.Forbidden
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Forced != nil {
+		in, out := &in.Forced, &out.Forced
+		*out = new(string)
+		**out = **in
+	}
+	if in.Default != nil {
+		in, out := &in.Default, &out.Default
+		*out = new(string)
+		**out = **in
+	}
+}
+
+// DeepCopy copies all properties into another NamespaceRule.
+func (in *NamespaceRule) DeepCopy() *NamespaceRule {
+	if in == nil {
+		return nil
+	}
+	out := new(NamespaceRule)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties into another SelectionRules.
+func (in *SelectionRules) DeepCopyInto(out *SelectionRules) {
+	*out = *in
+	if in.NamespaceRules != nil {
+		in, out := &in.NamespaceRules, &out.NamespaceRules
+		*out = make([]NamespaceRule, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopy copies all properties into another SelectionRules.
+func (in *SelectionRules) DeepCopy() *SelectionRules {
+	if in == nil {
+		return nil
+	}
+	out := new(SelectionRules)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties into another MemoryPolicySpec.
+func (in *MemoryPolicySpec) DeepCopyInto(out *MemoryPolicySpec) {
+	*out = *in
+	if in.Backing != nil {
+		in, out := &in.Backing, &out.Backing
+		*out = new(DRAMBacking)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.Selection != nil {
+		in, out := &in.Selection, &out.Selection
+		*out = new(SelectionRules)
+		(*in).DeepCopyInto(*out)
+	}
+}
+
+// DeepCopy copies all properties into another MemoryPolicySpec.
+func (in *MemoryPolicySpec) DeepCopy() *MemoryPolicySpec {
+	if in == nil {
+		return nil
+	}
+	out := new(MemoryPolicySpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties into another MemoryPolicy.
+func (in *MemoryPolicy) DeepCopyInto(out *MemoryPolicy) {
+	*out = *in
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	out.Status = in.Status
+}
+
+// DeepCopy copies all properties into another MemoryPolicy.
+func (in *MemoryPolicy) DeepCopy() *MemoryPolicy {
+	if in == nil {
+		return nil
+	}
+	out := new(MemoryPolicy)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyObject copies all properties into another Object.
+func (in *MemoryPolicy) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopyInto copies all properties into another MemoryPolicyList.
+func (in *MemoryPolicyList) DeepCopyInto(out *MemoryPolicyList) {
+	*out = *in
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]MemoryPolicy, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopy copies all properties into another MemoryPolicyList.
+func (in *MemoryPolicyList) DeepCopy() *MemoryPolicyList {
+	if in == nil {
+		return nil
+	}
+	out := new(MemoryPolicyList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyObject copies all properties into another Object.
+func (in *MemoryPolicyList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
