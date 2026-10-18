@@ -1,258 +1,112 @@
 # memory-tier-operator
 
-Host-transparent memory tiering for Kubernetes: let workloads claim
-DRAM or CXL memory as schedulable resources, with kernel-enforced
-placement and an optional hard wall.
+Experimental memory-tiering components for Kubernetes and KubeVirt. The goal is
+higher useful VM density with CXL, while allowing administrator-owned workload
+policy and a credible DRAM-only option. **This checkout is not a completed or
+runtime-validated implementation of that policy.**
 
-## The model
+## What runs, and what is only a library
 
-The kernel has two orthogonal memory axes, and this operator exposes
-both:
+- `cmd/operator/` still registers the existing `MemoryTiering`/DRA reconciler;
+  `cmd/driver/` publishes discovered memory resources and starts asynchronous
+  cgroup-mask reconciliation during claim preparation.
+- The `memory-policy-classes` branch also contains class types, a CRD manifest,
+  pure selection logic in `internal/policy/` and VMI rendering functions in
+  `internal/render/`. **No admission handler invokes those functions.** They
+  do not replace the running DRA path, reserve a new common DRAM budget, or
+  implement guest-residency status.
+- See [class prototype boundaries](docs/memory-policy-classes.md) before using
+  examples. Installation/deployment manifests are experimental assets, not an
+  authorization to apply them or a supported production configuration.
 
-**Placement** — where pages are *born*. Set via `cpuset.mems` on the
-workload's cgroup: first-touch allocation goes to the local (DRAM)
-node, and falls back to the CXL node when DRAM is full (if the mask
-allows it).
+## Separate the obligations
 
-**Persistence** — whether pages can *move after birth*. Ordinary
-memory is managed by the kernel: hot pages stay on DRAM, cold pages
-demote to CXL under memory pressure. Hugepage-backed memory is a hard
-wall: it is never on any LRU list, so the kernel cannot reclaim or
-demote it.
+A protected-memory promise needs capacity before acceptance, tier-correct
+allocation before backing faults, and backing-specific persistence afterward.
+A class name, memory request, cgroup mask and current page location answer
+separate questions. Permission to use CXL does not require a fixed split or
+promise that actively touched pages always remain on DRAM.
 
-Every tier is a composition of these two axes. Nothing else is
-invented.
+`memory.current` and ordinary memory requests are not DRAM-only quotas. Movement
+can change location without reducing charge in private-anonymous workloads;
+other reclaimable content can reduce charge. Historical pod-own `memory.high`
+experiments demoted actively touched data too. Neither a hot-set claim size nor
+a class annotation provides a runtime percentage floor.
 
-## The tiers
+`cpuset.mems` is an allocation constraint, not a persistence wall. The current
+asynchronous prepare/reconcile path does not prove enforcement before QEMU's
+first backing faults. CPU/CPU-less discovery heuristics and node-number masks
+are lab-shaped, not a general tier classifier.
 
-| Tier | Claim | VM persistence | What you get |
-|---|---|---|---|
-| default | *none* | ordinary | Cold tail demotes to CXL under pressure (84% measured). No API needed. |
-| `cxl-tier` | capacity on CXL | ordinary | Born on CXL, never promotes. Density-first. |
-| `tiered` | hot-set on DRAM | ordinary | Born on DRAM, falls back to CXL, kernel splits by access behavior (87% measured). |
-| `dram-tier` + wall | capacity on DRAM | hugepages | Born on DRAM **and** never demotable. The hard wall. |
+## Backing candidates, not interchangeable implementations
 
-The `tiered` claim size is the **hot-set budget**: an admission-time
-reservation on the node's DRAM ledger. The kernel enforces the actual
-split by access pattern — pages being touched stay on DRAM, cold
-pages spill — so the budget is a reservation, not a runtime guarantee.
+- A DRAM-only hugetlb pool and matching KubeVirt guest hugepage resource/backing
+  are one candidate. `hugepages-2Mi` names page size, not tier. Pool locality,
+  actual guest allocation, ordinary QEMU/host overhead, capacity release and
+  migration overlap must be checked. Generic hugepage wall observations are
+  not validation of this complete operator policy.
+- The class renderer's `MemLock` option writes
+  `spec.domain.memory.reservedOverhead.memLock: Required`. In pinned KubeVirt
+  v1.10.0-beta.0 (`c418f32d6fefd864f19d3a7f436dd6bfa8827036`), this Alpha-gated
+  field raises `RLIMIT_MEMLOCK`; it does **not** request `<locked/>` ordinary
+  guest backing. A real explicit lock-request route, initial tier placement,
+  shared capacity, safe failure and lifecycle behavior are additional work.
+- Memory Manager Static is a NUMA planner, not a tier selector. Kubernetes
+  v1.37.1 (`f78e722310e50bcaca9276be22276d9e91d91308`) includes all topology
+  nodes; omission from `reservedMemory` means zero system reserve, not
+  exclusion. Observed node-0 assignments do not establish portable DRAM-only
+  placement. Fractional CPU supplies no exclusive-CPU hint in that path.
 
-The `dram-tier` + hugepages combination is the only hard wall: the
-claim gates placement (`cpuset.mems=0`) and the hugepage backing gates
-persistence (never on LRUs). Both knobs are needed — a wall without a
-placement gate pins pages wherever they happened to fault, and a
-placement gate without a wall lets cold pages demote.
+No backing is selected for the product by the library's defaulting behavior.
+Supported fields, plugin/admission integration, internally injected DRA and
+upstream tier contracts remain architecture alternatives. Avoiding workload
+implementation details does not categorically reject internal DRA.
 
-## Installing
+## Shared capacity and observability gaps
 
-```sh
-kubectl apply -f deploy/install.yaml
-```
+The driver publishes `dram-0` and `tiered-0` with the same full physical DRAM
+capacity, without shared counters/native-resource mapping. Independent alias
+budgets can overpromise common memory. Ordinary native memory accounting is
+not a DRAM guarantee when system-RAM CXL is included; it also does not
+transparently account every nonclaim DRAM consumer for a separate DRA promise.
+API features for consumable capacity, shared counters and native-resource
+mapping require a coherent version/gate/accounting design, not field presence.
 
-This creates the CRD, RBAC, and the operator deployment. Create a
-`MemoryTiering` CR to reconcile the DeviceClasses and the driver
-DaemonSet:
+Cgroup anonymous per-node counters are not guest-RAM-only residency and are
+not complete hugetlb/file/memfd accounting. Separate intent, reservations,
+actual backing/location, overhead and unknown coverage before integrating a
+production status API. NRT publishes locality information; scoring a worker
+is not choosing/enforcing a NUMA tier inside it.
 
-```yaml
-apiVersion: memorytier.shanemcd.com/v1alpha1
-kind: MemoryTiering
-metadata:
-  name: cluster
-  namespace: memory-tier-operator
-spec:
-  driverImage: <image>
-```
+## Offline checks and evidence scope
 
-The operator creates the `dram-tier`, `cxl-tier`, and `tiered`
-DeviceClasses and a privileged DaemonSet that discovers each node's
-NUMA/CXL topology, publishes it as DRA ResourceSlices, and enforces
-placement per claim.
-
-## Using tiers
-
-### Pods
-
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: dram-worker
-spec:
-  containers:
-  - name: work
-    image: ...
-    resources:
-      requests:
-        cpu: "1"
-  resourceClaims:
-  - name: memory
-    resourceClaimTemplateName: dram-worker-memory
----
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaimTemplate
-metadata:
-  name: dram-worker-memory
-spec:
-  spec:
-    devices:
-      requests:
-      - name: memory
-        exactly:
-          deviceClassName: dram-tier
-          allocationMode: All
-          capacity:
-            requests:
-              memorytier.openshift.io/memory: 1Gi
-```
-
-Verify on the node:
+From a recorded source tree, without cluster access:
 
 ```sh
-cat /sys/fs/cgroup/kubepods.slice/*/kubepods-*pod<uid>.slice/cpuset.mems
-# "0" for dram-tier, "1" for cxl-tier, "0-1" for tiered
+go build ./...
+go test ./internal/policy/ ./internal/render/
 ```
 
-### Virtual machines (KubeVirt)
+The two packages have 20 test functions at baseline `215af0816bc9350aa6d5f029bd2244592133b24d`.
+Build/tests prove the stated library behavior, not admission wiring, correct
+physical budgets, final launcher QoS, guest locking or runtime VM guarantees.
+Record working-tree differences/digests as well as HEAD when testing local
+changes; do not label dirty source as exactly a clean commit.
 
-VMs use the standard `spec.resourceClaims` field — no KubeVirt
-modifications required. The combinations:
+Historical evidence is in the gameplan HPSTRAT-40 tracking area's
+`experiments/poc-phase0/` and earlier lab records. Source-corrected design,
+architecture alternatives, measurement contract, emulated functional matrix
+and physical-CXL value plan are in that area's `drafts/` directory. The
+unconditional Phase 0 runtime gate remains withdrawn. Emulated CXL is backed
+by host RAM without host-NUMA binding and uses a test-only cache-invalidation
+bypass: no physical latency/bandwidth/coherency, equal-SLO density or economic
+claim follows from those experiments.
 
-| Claim | VM memory backing | Guest RAM placement | Guest RAM persistence | QEMU overhead |
-|---|---|---|---|---|
-| none | ordinary | DRAM (first-touch) | demotes under pressure | demotes |
-| `cxl-tier` | ordinary | CXL only | terminal tier, never promotes | demotes |
-| `tiered` | ordinary | DRAM, fallback to CXL | hot stays, cold demotes (87%) | demotes |
-| `dram-tier` | ordinary | DRAM only | hot stays, cold demotes | demotes |
-| `dram-tier` | hugepages | DRAM only | **hard wall — never demotes** | demotes (not hugepage-backed) |
-| `tiered` | hugepages | DRAM, fallback CXL | hard wall, but may land on CXL if DRAM is full at fault time | demotes |
-| `cxl-tier` | hugepages | CXL only | hard wall on CXL | demotes |
-
-The `dram-tier` + hugepages row is the tier-100 recipe. Example:
-
-```yaml
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaimTemplate
-metadata:
-  name: my-vm-dram-wall
-spec:
-  spec:
-    devices:
-      requests:
-      - name: memory
-        exactly:
-          deviceClassName: dram-tier
-          allocationMode: All
-          capacity:
-            requests:
-              memorytier.openshift.io/memory: 1Gi
----
-apiVersion: kubevirt.io/v1
-kind: VirtualMachine
-metadata:
-  name: pinned-vm
-spec:
-  runStrategy: Always
-  template:
-    spec:
-      domain:
-        memory:
-          guest: 1Gi
-          hugepages:
-            pageSize: "2Mi"
-        resources:
-          requests:
-            memory: "1Gi"
-      resourceClaims:
-      - name: memory-tier
-        resourceClaimTemplateName: my-vm-dram-wall
-      volumes: ...
-```
-
-Requirements for the hugepage wall:
-
-- The node must have hugepages provisioned **on the DRAM NUMA node**
-  (`/sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages`).
-  The pool placement is the placement half of the wall; provisioning
-  on the CXL node would wall the VM onto the slow tier.
-- The node must register `hugepages-2Mi` as an extended resource
-  (kubelet detects sysfs; a restart picks up runtime allocation).
-- KubeVirt requests the hugepages resource automatically when
-  `domain.memory.hugepages` is set.
-
-Measured: a 1 GiB hugepage-backed VM under node pressure that demoted
-4.4 GiB across the node — the guest RAM (hugetlb pool, node 0) never
-moved; QEMU's ordinary overhead (not hugepage-backed) demoted
-normally. Persistence is per-allocation, not per-cgroup.
-
-## Design notes
-
-### Capacity accounting
-
-- **DRAM**: the DRA claim is a placement gate. The stock scheduler's
-  pod memory request remains the binding constraint on DRAM usage.
-- **CXL**: the DRA pool is the only capacity accounting — CXL memory
-  is invisible to the stock scheduler (not in node allocatable).
-  Claims decrement the ledger; exhaustion blocks scheduling without
-  substitution.
-
-### Kernel facts (measured)
-
-- Demotion is node-level and global. It explicitly ignores cgroup
-  cpusets (`mm/vmscan.c`: "Demotion ignores all cpuset and mempolicy
-  settings"). The mask gates allocation, not migration.
-- Hot pages never demote — reclaim only selects unreferenced pages.
-  The latency-relevant working set stays on DRAM regardless of claims.
-- `memory.min` does not floor node residency: protection is
-  charge-based, demotion is charge-neutral. A cgroup under its floor
-  by residency is never below it by charge; the reclaim scan walks
-  through.
-- `mlock` is a per-process wall (unevictable pages never enter the
-  reclaim scan), but cannot be applied to another process's memory.
-  For VMs, the equivalent is QEMU's locked memory backing — not
-  exposed by KubeVirt today; hugepages are the available wall.
-- `numa_demotion_enabled` ships `false` on RHEL. The driver enables
-  it on nodes with a CXL tier. Setting it to `false` on a node makes
-  every mask absolute (nothing ever moves) at the cost of all tiering.
-- Guest-hot pages are visible to the host's aging via EPT accessed-bit
-  folding: a VM's actively-touched memory stays on DRAM under pressure
-  while its cold tail spills.
-
-### The driver
-
-A per-node DaemonSet that:
-
-1. Discovers the NUMA/CXL topology from `/sys` (CPU nodes = DRAM
-   tier; CPU-less nodes with committed CXL regions = CXL tier)
-2. Publishes it as DRA ResourceSlices (byte-granular capacity, shared
-   devices, one pool per node)
-3. Registers with the kubelet as a DRA plugin
-4. On claim preparation, writes `cpuset.mems` on the pod's cgroup —
-   the placement axis — and maintains it against kubelet cgroup
-   setup via a reconciler
-
-The `tiered` device is published only on nodes with a CXL tier, so
-tiered claims cannot schedule on DRAM-only nodes.
-
-### Scope
-
-The system has three moving parts: the operator (reconciles classes
-and the DaemonSet), the driver (discovers topology, publishes slices,
-writes one cgroup file per claim), and the scheduler's in-tree DRA
-evaluation. `spec.resourceClaims` is the only API surface. Runtime
-page placement is entirely the kernel's — no userspace component
-moves pages, and no per-VM runtime percentage floor is offered (no
-standing kernel mechanism provides one; see the kernel-facts section
-for what was measured).
-
-## Status
-
-Alpha. Developed and verified against QEMU-emulated CXL Type-3 devices
-(a CPU-less NUMA node with a committed region, on a custom kernel with
-`CONFIG_CXL_REGION_INVALIDATION_TEST=y`). All tier combinations have
-been verified end-to-end on stock KubeVirt. A per-VM runtime
-percentage floor (the ratio between tier-100 and tiered) would require
-either a per-memory-backend `locked` property in QEMU upstream or a
-userspace controller; neither exists today.
+Further work requires stakeholder agreement before implementation wiring,
+separate runtime/pressure authorization, chosen support versions/backing,
+physical hardware/workload/SLO owners and independent review. Credential
+rotation/history exposure follow-up remains with owners; no such action is
+automatically authorized by this prototype or its tests.
 
 ## License
 

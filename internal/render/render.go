@@ -1,18 +1,19 @@
 // Package render applies a resolved memory policy class to a VMI.
 //
-// Pure logic, unit-tested offline. The rendering targets EXISTING
-// KubeVirt fields only — the zero-new-API route measured in Phase 0:
+// Pure logic, unit-tested offline; no admission handler invokes it.
+// These existing-field mutations do not implement a complete tier contract:
 //
-//   - DRAMOnly renders the Guaranteed resource shape (requests ==
-//     limits for cpu and memory — fractional CPU is fine and still
-//     Guaranteed; the Memory Manager then places the pod on the
-//     reservedMemory-declared DRAM node) plus the class backing:
-//     hugepages (spec.domain.memory.hugepages) or memory locking
-//     (spec.domain.memory.memLock: Required — the KubeVirt 1.10
-//     field). Both are measured persistence walls.
-//   - Tiered renders nothing on the spec — the kernel's demotion is
-//     the mechanism — and records the decision on annotations for
-//     observability.
+//   - DRAMOnly sets matching VMI CPU/memory requests and limits plus
+//     hugepage backing or spec.domain.memory.reservedOverhead.memLock.
+//     Final launcher QoS/overhead must be checked separately. Static is
+//     a NUMA planner, not a DRAM selector: omitted reservedMemory nodes
+//     are not excluded. In pinned KubeVirt v1.10.0-beta.0, MemLockRequired
+//     raises RLIMIT_MEMLOCK but does not request locked guest backing.
+//   - Tiered leaves the spec unchanged and annotates the decision.
+//     This is intent metadata, not measured residency or a hot-set promise.
+//
+// Actual tier placement, persistence, shared capacity and lifecycle behavior
+// remain unimplemented/unvalidated obligations; see docs/memory-policy-classes.md.
 //
 // The class owns the mechanism: conflicting user-specified settings
 // (a different backing, or a non-Guaranteed resource shape) are
@@ -30,15 +31,14 @@ import (
 	kubevirtv1 "kubevirt.io/api/core/v1"
 )
 
-// Annotation keys recording the rendering outcome (observability).
+// Annotation keys recording the rendering decision, not actual residency.
 const (
 	RenderedPolicyAnnotation = "memorytiering.shanemcd.com/rendered-policy"
 	RenderedSourceAnnotation = "memorytiering.shanemcd.com/rendered-source"
 )
 
-// defaultCPU is the request/limit the renderer sets when the VMI
-// specifies none: it only needs to make the pod shape Guaranteed
-// (requests == limits), not to reserve real CPU.
+// defaultCPU is the VMI request/limit when absent. It is a real CPU resource
+// request, not an exclusive CPU assignment. Final pod QoS is a separate check.
 const defaultCPU = "100m"
 
 // RenderVMI applies the resolved class to the VMI spec.
@@ -88,8 +88,8 @@ func renderDRAMOnly(vmi *kubevirtv1.VirtualMachineInstance, r *policy.Resolved) 
 	return renderGuaranteedShape(vmi)
 }
 
-// renderBacking sets the persistence wall. The class owns it: an
-// existing user-specified conflicting backing is an error.
+// renderBacking sets the candidate backing field (MemLock is permission only).
+// An existing user-specified conflicting setting is an error.
 func renderBacking(vmi *kubevirtv1.VirtualMachineInstance, b memoryv1alpha1.DRAMBacking) error {
 	mem := vmi.Spec.Domain.Memory
 	if mem == nil {
@@ -156,7 +156,7 @@ func renderGuaranteedShape(vmi *kubevirtv1.VirtualMachineInstance) error {
 	}
 
 	// cpu: default when absent; mirror when one-sided; fractional is
-	// fine — requests == limits is what makes the pod Guaranteed.
+	// fine for this VMI shape; final launcher QoS still requires validation.
 	if _, ok := req[k8sv1.ResourceCPU]; !ok {
 		if l, ok := lim[k8sv1.ResourceCPU]; ok {
 			req[k8sv1.ResourceCPU] = l

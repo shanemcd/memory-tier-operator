@@ -3,16 +3,15 @@
 // MemoryPolicy is the cluster-scoped, administrator-defined memory
 // policy class: the workload-facing QoS surface for host-transparent
 // memory tiering. A workload selects a class by name (annotation on
-// the VMI); the class carries the mechanism and renders into existing
-// Kubernetes and KubeVirt fields at admission (Guaranteed resource
-// shape, Memory Manager Static placement, and a persistence backing —
-// hugepages or memory locking). The Tiered mode is the explicit
-// default behavior: kernel demotion with no additional mechanism.
+// the VMI). These are proposed types plus unwired resolution/rendering
+// functions, not a deployed admission service. Existing fields alone do not
+// establish tier placement, persistence or shared physical accounting.
+// The MemLock option currently renders a limit allowance, not a lock request.
+// Tiered permits movement without promising a split or hot-page retention.
 //
-// This is the direction replacing the DRA-claims path on main: the
-// class is infrastructure-owned (the administrator defines what is
-// available and who may use it), and the workload expresses need, not
-// mechanism.
+// Infrastructure owns the proposed implementation; the executable still
+// registers the DRA reconciler. Internal DRA and upstream alternatives remain
+// open; see docs/memory-policy-classes.md.
 package v1alpha1
 
 import (
@@ -25,9 +24,8 @@ import (
 type MemoryPolicyMode string
 
 const (
-	// DRAMOnly places the workload's guest memory on the fast tier at
-	// admission and keeps it there under node pressure (placement via
-	// Memory Manager Static + a persistence backing).
+	// DRAMOnly expresses the intended protected scope. The library does not
+	// implement a complete placement/persistence/capacity contract.
 	DRAMOnly MemoryPolicyMode = "DRAMOnly"
 	// Tiered allows guest memory to span tiers with the kernel moving
 	// cold pages to the slow tier — the default system behavior on a
@@ -35,25 +33,24 @@ const (
 	Tiered MemoryPolicyMode = "Tiered"
 )
 
-// BackingType is the persistence wall used by DRAM-only classes.
+// BackingType selects a candidate rendering; MemLock is permission only.
 // +kubebuilder:validation:Enum=Hugepages;MemLock
 type BackingType string
 
 const (
-	// HugepagesBacking renders spec.domain.memory.hugepages; the pool
-	// provides structural placement and scheduler-visible accounting.
+	// HugepagesBacking renders spec.domain.memory.hugepages. DRAM pool
+	// locality, actual guest use and shared accounting need validation.
 	HugepagesBacking BackingType = "Hugepages"
-	// MemLockBacking renders spec.domain.memory.memLock: Required
-	// (KubeVirt 1.10 field); no node partition beyond Static.
+	// MemLockBacking renders spec.domain.memory.reservedOverhead.memLock:
+	// Required. Pinned KubeVirt raises RLIMIT_MEMLOCK, not locked backing.
 	MemLockBacking BackingType = "MemLock"
 )
 
-// DRAMBacking configures the persistence wall of a DRAM-only class.
-// The choice between Hugepages and MemLock is an administrator
-// tradeoff (scheduler-visible accounting vs no boot-time pool) — the
-// prototype implements both; the product decision is open.
+// DRAMBacking configures a prototype candidate field. Only permission is
+// rendered for MemLock; an explicit request mechanism is additional work.
+// Product backing/integration decisions and runtime validation remain open.
 type DRAMBacking struct {
-	// Type selects the persistence wall.
+	// Type selects the candidate rendering.
 	// +kubebuilder:validation:Enum=Hugepages;MemLock
 	// +kubebuilder:default=Hugepages
 	Type BackingType `json:"type"`
@@ -67,7 +64,7 @@ type DRAMBacking struct {
 // NamespaceRule constrains class selection for one namespace ("*"
 // matches all). Forced wins over the workload's selection; an explicit
 // selection that is forbidden (or not in a non-empty allowed list) is
-// rejected at admission — never silently downgraded.
+// rejected by the resolver. A future admission adapter must enforce the result.
 type NamespaceRule struct {
 	// Namespace this rule applies to; "*" matches every namespace.
 	// +kubebuilder:validation:MinLength=1
@@ -106,7 +103,7 @@ type MemoryPolicySpec struct {
 	// Mode selects the class behavior.
 	Mode MemoryPolicyMode `json:"mode"`
 
-	// Backing is the persistence wall for DRAM-only classes. Required
+	// Backing is the candidate field rendering for DRAM-only classes. Required
 	// semantically for DRAMOnly (defaulted to Hugepages 2Mi by the
 	// resolver when omitted); ignored for Tiered.
 	// +optional
@@ -125,8 +122,8 @@ type MemoryPolicySpec struct {
 	Selection *SelectionRules `json:"selection,omitempty"`
 }
 
-// MemoryPolicyStatus is reserved; the rendering outcome is recorded on
-// the workload (VMI status annotation), not on the class.
+// MemoryPolicyStatus is reserved. The library records the rendering decision
+// in VMI metadata annotations; no residency status integration exists.
 type MemoryPolicyStatus struct{}
 
 // +kubebuilder:object:root=true
