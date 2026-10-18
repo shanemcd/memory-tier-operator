@@ -56,6 +56,17 @@ type VMIMutation struct {
 	AllowMemLockBacking bool
 }
 
+// Labels stamped onto every governed VMI so that policy identity
+// propagates to the launcher pod (KubeVirt copies VMI labels onto it)
+// and becomes joinable in Prometheus via kube-state-metrics'
+// kube_pod_labels. The mode label is what alerts key on: the class NAME
+// (e.g. "gold-hp") is site-specific vocabulary, but its MODE (DRAMOnly /
+// Tiered) is the semantic the alert contract needs.
+const (
+	policyClassLabel = "memorytiering.shanemcd.com/policy-class"
+	policyModeLabel  = "memorytiering.shanemcd.com/policy-mode"
+)
+
 // Handle implements admission.Handler.
 func (h *VMIMutation) Handle(ctx context.Context, req admission.Request) admission.Response {
 	// Registered for CREATE only; pass through anything else untouched.
@@ -96,6 +107,17 @@ func (h *VMIMutation) Handle(ctx context.Context, req admission.Request) admissi
 	if err := render.RenderVMI(rendered, resolved); err != nil {
 		// Conflicting user-specified mechanism or resource shape.
 		return admission.Denied(err.Error())
+	}
+
+	// Stamp policy identity as labels (after DeepCopy so the patch carries
+	// them). These ride standard label propagation all the way to
+	// kube_pod_labels, which is what the DRAMOnly spill alert joins on.
+	if rendered.Labels == nil {
+		rendered.Labels = map[string]string{}
+	}
+	rendered.Labels[policyClassLabel] = resolved.Policy.Name
+	if mode := string(resolved.Policy.Spec.Mode); mode != "" {
+		rendered.Labels[policyModeLabel] = mode
 	}
 
 	raw, err := json.Marshal(rendered)

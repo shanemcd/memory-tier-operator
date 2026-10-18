@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	jsonpatch "github.com/evanphx/json-patch/v5"
 	admissionv1 "k8s.io/api/admission/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -298,4 +299,95 @@ func TestNonCreatePassesThrough(t *testing.T) {
 	if len(resp.Patches) != 0 {
 		t.Errorf("expected no patches, got %v", resp.Patches)
 	}
+}
+
+func TestPolicyLabelsStamped(t *testing.T) {
+	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldHPPolicy()}, false)
+	req := vmiRequest(t, testScheme(t), "gold-hp")
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Fatalf("expected allowed, got denial: %s", resp.Result.Message)
+	}
+	vmi := patchedVMI(t, req, resp)
+	if got := vmi.Labels[policyClassLabel]; got != "gold-hp" {
+		t.Errorf("policy-class label = %q, want gold-hp", got)
+	}
+	if got := vmi.Labels[policyModeLabel]; got != "DRAMOnly" {
+		t.Errorf("policy-mode label = %q, want DRAMOnly", got)
+	}
+}
+
+func TestPolicyModeLabelReflectsClassMode(t *testing.T) {
+	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*tieredPolicy()}, false)
+	req := vmiRequest(t, testScheme(t), "tiered")
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Fatalf("expected allowed, got denial: %s", resp.Result.Message)
+	}
+	vmi := patchedVMI(t, req, resp)
+	if got := vmi.Labels[policyModeLabel]; got != "Tiered" {
+		t.Errorf("policy-mode label = %q, want Tiered", got)
+	}
+}
+
+func TestExistingLabelsPreserved(t *testing.T) {
+	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldHPPolicy()}, false)
+	req := vmiRequest(t, testScheme(t), "gold-hp")
+	vmi := &kubevirtv1.VirtualMachineInstance{}
+	if err := json.Unmarshal(req.Object.Raw, vmi); err != nil {
+		t.Fatal(err)
+	}
+	vmi.Labels = map[string]string{"app": "demo", policyClassLabel: "stale-old-value"}
+	raw, err := json.Marshal(vmi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Object.Raw = raw
+
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Fatalf("expected allowed, got denial: %s", resp.Result.Message)
+	}
+	final := patchedVMI(t, req, resp)
+	if got := final.Labels["app"]; got != "demo" {
+		t.Errorf("unrelated label lost: app = %q, want demo", got)
+	}
+	if got := final.Labels[policyClassLabel]; got != "gold-hp" {
+		t.Errorf("policy-class label = %q, want gold-hp (stale value replaced)", got)
+	}
+	if got := final.Labels[policyModeLabel]; got != "DRAMOnly" {
+		t.Errorf("policy-mode label = %q, want DRAMOnly", got)
+	}
+}
+
+// patchedVMI applies the admission response's patch to the original
+// request object and returns the resulting VMI, so tests can assert on
+// the effect rather than the patch's wire shape (whole-map add vs
+// per-key paths).
+func patchedVMI(t *testing.T, req admission.Request, resp admission.Response) *kubevirtv1.VirtualMachineInstance {
+	t.Helper()
+	if len(resp.Patches) == 0 {
+		vmi := &kubevirtv1.VirtualMachineInstance{}
+		if err := json.Unmarshal(req.Object.Raw, vmi); err != nil {
+			t.Fatal(err)
+		}
+		return vmi
+	}
+	raw, err := json.Marshal(resp.Patches)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch, err := jsonpatch.DecodePatch(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patched, err := patch.Apply(req.Object.Raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vmi := &kubevirtv1.VirtualMachineInstance{}
+	if err := json.Unmarshal(patched, vmi); err != nil {
+		t.Fatal(err)
+	}
+	return vmi
 }
