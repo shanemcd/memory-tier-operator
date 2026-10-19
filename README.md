@@ -12,9 +12,14 @@ runtime-validated implementation of that policy.**
   cgroup-mask reconciliation during claim preparation.
 - The `memory-policy-classes` branch also contains class types, a CRD manifest,
   pure selection logic in `internal/policy/` and VMI rendering functions in
-  `internal/render/`. **No admission handler invokes those functions.** They
-  do not replace the running DRA path, reserve a new common DRAM budget, or
-  implement guest-residency status.
+  `internal/render/`. As of v10 these are **wired into a live mutating admission
+  webhook** (`internal/webhook/`): VMI CREATE in namespaces labeled
+  `memorytiering.shanemcd.com/governed=true` is resolved fail-closed (unknown
+  or forbidden class ⇒ deny) and rendered onto the VMI; policy identity labels
+  are stamped for observability. Deployed and demonstrated on the lab cluster —
+  see the design repo's `memory-policy-design.md` and `demo-evidence/`.
+  They still do not replace the running DRA path, reserve a new common DRAM
+  budget, or implement guest-residency status.
 - See [class prototype boundaries](docs/memory-policy-classes.md) before using
   examples. Installation/deployment manifests are experimental assets, not an
   authorization to apply them or a supported production configuration.

@@ -1,4 +1,4 @@
-# Memory policy classes: unwired prototype, not a replacement service
+# Memory policy classes: admission-wired prototype, not a replacement service
 
 This branch explores administrator-owned simple workload intent for higher VM
 density using CXL. Workload owners express need; infrastructure owns the
@@ -20,9 +20,14 @@ an operational preference.
   guest backing fields and CPU/memory request/limit shape. Matching VMI
   requests/limits does not by itself prove the final launcher QoS after
   KubeVirt overhead, sidecars and other admission mutations.
-- **No admission handler calls these functions.** `cmd/operator/` still
-  registers the existing DRA reconciler. The driver remains executable in
-  this branch; it is not merely deprecated history on another branch.
+- **Admission wiring exists and is deployed.** `internal/webhook/`
+  (`VMIMutation`) intercepts VMI CREATE in governed namespaces, resolves the
+  class fail-closed (unknown/forbidden ⇒ deny with the resolver's message),
+  renders via `internal/render/`, refuses MemLock backing without
+  `--allow-memlock-backing` (KubeVirt < 1.10 silently prunes the field), and
+  stamps policy identity labels. `cmd/operator/` registers it alongside the
+  existing DRA reconciler. The earlier state (no admission handler) is
+  superseded.
 - There is no new shared scheduler DRAM budget, synchronous pre-fault
   enforcement contract, VM collector or VMI residency status integration.
 
