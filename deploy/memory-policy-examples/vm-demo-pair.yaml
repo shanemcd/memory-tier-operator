@@ -44,11 +44,23 @@ spec:
     metadata:
       annotations:
         memorytiering.shanemcd.com/policy-class: tiered
+        # The tier-aware descheduler may evict this VM from a node whose
+        # DRAM comes under pressure (that is the stack working). Pin it to
+        # the CXL node for the pressure side-by-side demo, and ask the
+        # descheduler to leave it alone while the presser runs.
+        descheduler.alpha.kubernetes.io/evict: "false"
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: worker-cxl-0
       domain:
         devices: {}
         memory:
+          # maxGuest pins the hotplug ceiling to the container budget:
+          # kubevirt defaults maxGuest to guest*4 (memory hotplug), and
+          # fedora auto-onlines virtio-mem, which would grow the guest
+          # past the launcher's memory limit and OOM it.
           guest: 1Gi
+          maxGuest: 1Gi
         disks:
           - name: rootdisk
             disk: {}

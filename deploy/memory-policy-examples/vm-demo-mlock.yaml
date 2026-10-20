@@ -1,0 +1,41 @@
+# Demo VM for the mlock (MemLock backing) DRAM-only policy class.
+# Same shape as demo-dram-only (gold-hp), but the class renders
+# reservedOverhead.memLock: Required instead of hugepages — the fork
+# turns that into libvirt <locked/>, i.e. mlocked, unevictable guest RAM
+# with no static hugepage pool.
+#
+# tier: DRAM-only composes the fork's DRA placement with the class's
+# retention: the VM controller materializes a ResourceClaimTemplate on
+# the dram-tier DeviceClass, so the pod is born inside the driver's
+# node-0 cpuset mask, and the mlock keeps it there (unevictable).
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: demo-mlock
+spec:
+  running: true
+  template:
+    metadata:
+      annotations:
+        memorytiering.shanemcd.com/policy-class: gold-lock
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: worker-cxl-0
+      domain:
+        devices: {}
+        memory:
+          # maxGuest pins the hotplug ceiling to the container budget:
+          # kubevirt defaults maxGuest to guest*4 (memory hotplug), and
+          # fedora auto-onlines virtio-mem — an mlocked guest would then
+          # grow past the launcher's memory limit and OOM it. With
+          # maxGuest == guest the locked region and the pod limit agree.
+          guest: 1Gi
+          maxGuest: 1Gi
+          tier: DRAM-only
+        disks:
+          - name: rootdisk
+            disk: {}
+      volumes:
+        - name: rootdisk
+          containerDisk:
+            image: quay.io/containerdisks/fedora:latest
