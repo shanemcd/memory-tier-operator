@@ -1,0 +1,27 @@
+# The fork API path: domain.memory.tier (DRA-backed).
+#
+# Unlike the policy-class annotation (operator renders Kubernetes
+# primitives), the tier field is translated by the kubevirt fork's
+# virt-controller into a VM-owned ResourceClaimTemplate sized to the
+# guest RAM and backed by the matching DeviceClass the MemoryTiering
+# operator publishes (DRAM-only -> dram-tier). The DRA driver then
+# allocates from the node's pool and pins the launcher to the tier's
+# NUMA node(s). Requires the kubevirt fork (memory-tier-main).
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: demo-tier-dra
+spec:
+  running: true
+  template:
+    spec:
+      domain:
+        memory:
+          guest: 256Mi
+          tier: DRAM-only
+        devices: {}
+      volumes:
+        - name: rootdisk
+          containerDisk:
+            image: quay.io/containerdisks/fedora:latest
