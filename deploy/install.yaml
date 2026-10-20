@@ -54,6 +54,11 @@ spec:
 #   kubectl label ns <demo-ns> memorytiering.shanemcd.com/governed=true
 #   kubectl apply -f deploy/memory-policy-examples/00-classes.yaml
 #
+# On OpenShift, first enable the internal registry and push the image:
+#   ./hack/push-image.sh v8                  # builds + pushes the operator
+# (the registry must be Managed with a defaultRoute — see
+# hack/push-image.sh for the one-time cluster patch).
+#
 # Then create a MemoryTiering CR (deploy/example.yaml) for the driver,
 # and VMIs in governed namespaces resolve a MemoryPolicy class at
 # admission (deploy/memory-policy-examples/vm-demo-pair.yaml).
@@ -63,7 +68,39 @@ kind: Namespace
 metadata:
   name: kubevirt-mt
   labels:
+    # The driver daemon is privileged (kubelet DRA plugin): hostPath
+    # kubelet plugin dirs, hostPID, runAsUser=0. Restricted PodSecurity
+    # would block the DaemonSet pods at admission.
     pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+---
+# Registry namespace for the operator/driver image
+# (image-registry.openshift-image-registry.svc:5000/kubevirt-dev/...).
+# On OpenShift, cri-o authenticates internal-registry pulls as the
+# POD's service account, so SAs in kubevirt-mt also need pull rights
+# in kubevirt-dev (the registry path namespace) — granted below.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubevirt-dev
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubevirt-mt-image-puller
+  namespace: kubevirt-dev
+  annotations:
+    description: >-
+      Lets pods from kubevirt-mt (operator, driver) pull the operator
+      image, which lives in the kubevirt-dev registry namespace.
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:image-puller
+subjects:
+- kind: Group
+  name: system:serviceaccounts:kubevirt-mt
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -103,6 +140,9 @@ rules:
 - apiGroups: [""]
   resources: ["pods", "nodes"]
   verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
 - apiGroups: ["rbac.authorization.k8s.io"]
   resources: ["roles", "rolebindings"]
   verbs: ["get", "list", "watch", "create", "update"]
@@ -124,6 +164,24 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: memory-tier-operator
+  namespace: kubevirt-mt
+---
+# The operator creates SA memory-tier-driver for the driver DaemonSet
+# at runtime; this binding takes effect as soon as that SA exists. The
+# driver is a kubelet DRA plugin (hostPath plugin dirs, privileged) and
+# needs the privileged SCC on OpenShift.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: memory-tier-driver-privileged-scc
+  namespace: kubevirt-mt
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:privileged
+subjects:
+- kind: ServiceAccount
+  name: memory-tier-driver
   namespace: kubevirt-mt
 ---
 apiVersion: apps/v1
