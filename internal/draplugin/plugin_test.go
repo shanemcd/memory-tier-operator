@@ -1,11 +1,52 @@
 package draplugin
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/types"
 )
+
+func TestPodCgroupPathFindsGuaranteedAndQoSLayers(t *testing.T) {
+	uid := "5ec78b20-5d0c-4367-bbb8-09b4c084554d"
+	escaped := "5ec78b20_5d0c_4367_bbb8_09b4c084554d"
+
+	// Guaranteed pods live directly under kubepods.slice with no QoS
+	// segment; Burstable/BestEffort pods sit in a kubepods-<qos>.slice
+	// subdirectory. Both must resolve.
+	for name, layout := range map[string]string{
+		"guaranteed":  "kubepods.slice/kubepods-pod" + escaped + ".slice",
+		"burstable":   "kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod" + escaped + ".slice",
+		"besteffort":  "kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod" + escaped + ".slice",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			orig := cgroupRoot
+			cgroupRoot = dir
+			t.Cleanup(func() { cgroupRoot = orig })
+
+			if err := os.MkdirAll(filepath.Join(dir, filepath.FromSlash(layout)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if got := podCgroupPath(types.UID(uid)); filepath.Clean(got) != filepath.Join(dir, filepath.FromSlash(layout)) {
+				t.Errorf("podCgroupPath(%s) = %q, want %q", uid, got, layout)
+			}
+		})
+	}
+}
+
+func TestPodCgroupPathAbsent(t *testing.T) {
+	dir := t.TempDir()
+	orig := cgroupRoot
+	cgroupRoot = dir
+	t.Cleanup(func() { cgroupRoot = orig })
+
+	if got := podCgroupPath(types.UID("00000000-0000-0000-0000-000000000000")); got != "" {
+		t.Errorf("podCgroupPath(missing) = %q, want empty", got)
+	}
+}
 
 func TestNodesToMask(t *testing.T) {
 	cases := []struct {

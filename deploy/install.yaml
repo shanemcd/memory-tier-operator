@@ -55,7 +55,7 @@ spec:
 #   kubectl apply -f deploy/memory-policy-examples/00-classes.yaml
 #
 # On OpenShift, first enable the internal registry and push the image:
-#   ./hack/push-image.sh v8                  # builds + pushes the operator
+#   ./hack/push-image.sh v9                  # builds + pushes the operator
 # (the registry must be Managed with a defaultRoute — see
 # hack/push-image.sh for the one-time cluster patch).
 #
@@ -200,10 +200,15 @@ spec:
       serviceAccountName: memory-tier-operator
       containers:
       - name: operator
-        image: image-registry.openshift-image-registry.svc:5000/kubevirt-dev/memory-tier-operator:v8
+        image: image-registry.openshift-image-registry.svc:5000/kubevirt-dev/memory-tier-operator:v9
         imagePullPolicy: Always
         args:
-          - -operator-image=image-registry.openshift-image-registry.svc:5000/kubevirt-dev/memory-tier-operator:v8
+          - -operator-image=image-registry.openshift-image-registry.svc:5000/kubevirt-dev/memory-tier-operator:v9
+          # MemLock backing (reservedOverhead.memLock: Required) is refused
+          # by default because upstream KubeVirt only wires the rlimit, not
+          # libvirt's <locked/> backing. The fork emits <locked/>, so this
+          # lab runs with the backing enabled.
+          - --allow-memlock-backing
         env:
         - name: NODE_NAME
           valueFrom:

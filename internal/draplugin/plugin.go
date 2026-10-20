@@ -36,8 +36,10 @@ const (
 	AttrDomain   = "memorytier.openshift.io"
 )
 
+// cgroupRoot is a var so tests can point it at a fake tree.
+var cgroupRoot = "/sys/fs/cgroup"
+
 const (
-	cgroupRoot = "/sys/fs/cgroup"
 	// The kubelet's pod cgroups live under a QoS sub-slice; UIDs are
 	// dash-escaped to underscores in slice names.
 	podSlicePattern = "kubepods-*-pod%s.slice"
@@ -232,10 +234,12 @@ func (p *Plugin) fullMask() string {
 // podCgroupPath resolves the pod's cgroup v2 directory, or "" if absent.
 func podCgroupPath(podUID types.UID) string {
 	escaped := strings.ReplaceAll(string(podUID), "-", "_")
-	// QoS layer first (the common case), then directly under kubepods.
+	// QoS layer first (BestEffort/Burstable), then directly under kubepods
+	// (Guaranteed pods live at kubepods.slice/kubepods-pod<uid>.slice,
+	// with no QoS segment in between).
 	for _, pattern := range []string{
 		filepath.Join(cgroupRoot, "kubepods.slice", "*", fmt.Sprintf(podSlicePattern, escaped)),
-		filepath.Join(cgroupRoot, "kubepods.slice", fmt.Sprintf(podSlicePattern, escaped)),
+		filepath.Join(cgroupRoot, "kubepods.slice", "kubepods-pod"+escaped+".slice"),
 	} {
 		if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
 			return matches[0]
