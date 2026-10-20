@@ -241,9 +241,12 @@ spec:
 # namespace, and the operator's own namespace (and system namespaces)
 # never need the label.
 #
-# caBundle is empty until hack/webhook-certs.sh runs (it creates the
+# caBundle is deliberately ABSENT: hack/webhook-certs.sh patches it in
+# after this manifest is applied, and an explicit empty value here would
+# wipe that patch on every re-apply. (Apply order: install.yaml first,
+# then webhook-certs.sh.)
 # TLS secret and patches the bundle). With zero governed namespaces
-# labeled, the empty bundle is inert.
+# labeled, the missing bundle is inert.
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
@@ -266,7 +269,6 @@ webhooks:
       namespace: kubevirt-mt
       port: 443
       path: /mutate-kubevirt-io-v1-virtualmachineinstance
-    caBundle: ""
   namespaceSelector:
     matchLabels:
       memorytiering.shanemcd.com/governed: "true"
