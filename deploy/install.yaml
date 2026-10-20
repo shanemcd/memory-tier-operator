@@ -54,10 +54,13 @@ spec:
 #   kubectl label ns <demo-ns> memorytiering.shanemcd.com/governed=true
 #   kubectl apply -f deploy/memory-policy-examples/00-classes.yaml
 #
-# On OpenShift, first enable the internal registry and push the image:
-#   ./hack/push-image.sh v9                  # builds + pushes the operator
-# (the registry must be Managed with a defaultRoute — see
-# hack/push-image.sh for the one-time cluster patch).
+# On OpenShift, first enable the internal registry (Managed with a
+# defaultRoute — the registry operator's config, one patch) and push
+# the image into it, e.g. over the default route:
+#   podman build -t <route>/kubevirt-dev/memory-tier-operator:v9 .
+#   podman login --tls-verify=false -u <user> --password-stdin <route>
+#   podman push --tls-verify=false <route>/kubevirt-dev/memory-tier-operator:v9
+# (the Containerfile COPYs prebuilt ./operator and ./driver binaries).
 #
 # Then create a MemoryTiering CR (deploy/example.yaml) for the driver,
 # and VMIs in governed namespaces resolve a MemoryPolicy class at
