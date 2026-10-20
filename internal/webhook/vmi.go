@@ -31,7 +31,6 @@ package webhook
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	admissionv1 "k8s.io/api/admission/v1"
@@ -49,11 +48,6 @@ import (
 type VMIMutation struct {
 	Client  client.Client
 	Decoder admission.Decoder
-
-	// AllowMemLockBacking permits the MemLock backing type. Requires a
-	// cluster actually running KubeVirt v1.10+ with the
-	// ReservedOverheadMemlock alpha feature enabled.
-	AllowMemLockBacking bool
 }
 
 // Labels stamped onto every governed VMI so that policy identity
@@ -93,14 +87,6 @@ func (h *VMIMutation) Handle(ctx context.Context, req admission.Request) admissi
 		// Rejection at admission: unknown class, forbidden selection,
 		// missing default. Never a silent downgrade.
 		return admission.Denied(err.Error())
-	}
-
-	if resolved.Policy.Spec.Mode == memoryv1alpha1.DRAMOnly &&
-		resolved.DefaultedBacking().Type == memoryv1alpha1.MemLockBacking &&
-		!h.AllowMemLockBacking {
-		return admission.Denied(fmt.Sprintf(
-			"memory policy class %q requests MemLock backing, which needs KubeVirt v1.10+ with the ReservedOverheadMemlock alpha feature; on this cluster the apiserver would prune the field silently, so admission is refused (fail closed). Start the operator with --allow-memlock-backing on a cluster that supports the field.",
-			resolved.Policy.Name))
 	}
 
 	rendered := vmi.DeepCopy()

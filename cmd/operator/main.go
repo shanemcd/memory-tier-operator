@@ -37,12 +37,10 @@ func main() {
 	var probeAddr string
 	var operatorImage string
 	var webhookCertDir string
-	var allowMemLockBacking bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "metrics endpoint bind address")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "health probe endpoint bind address")
 	flag.StringVar(&operatorImage, "operator-image", os.Getenv("OPERATOR_IMAGE"), "image the operator runs as (the driver defaults to it)")
 	flag.StringVar(&webhookCertDir, "webhook-cert-dir", "/tmp/k8s-webhook-server/serving-certs", "directory containing tls.crt/tls.key for the VMI admission webhook")
-	flag.BoolVar(&allowMemLockBacking, "allow-memlock-backing", false, "permit dram-only policies to render reservedOverhead.memLock (experimental; KubeVirt v1.10+ alpha)")
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseDevMode(false)))
@@ -79,9 +77,8 @@ func main() {
 	// Configuration selects governed namespaces and CREATE only.
 	mgr.GetWebhookServer().Register("/mutate-kubevirt-io-v1-virtualmachineinstance",
 		&admission.Webhook{Handler: &mtwebhook.VMIMutation{
-			Client:              mgr.GetClient(),
-			Decoder:             admission.NewDecoder(scheme),
-			AllowMemLockBacking: allowMemLockBacking,
+			Client:  mgr.GetClient(),
+			Decoder: admission.NewDecoder(scheme),
 		}})
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

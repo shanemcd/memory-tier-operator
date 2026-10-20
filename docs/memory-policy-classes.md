@@ -9,7 +9,7 @@ an operational preference.
 ## What exists
 
 - `api/v1alpha1/memorypolicy_types.go` and the CRD manifest describe classes
-  with `DRAMOnly | Tiered`, `Hugepages | MemLock`, cluster defaults and
+  with `DRAMOnly | Tiered`, `Hugepages`, cluster defaults and
   namespace allow/forbid/force/default rules. These are proposed API types;
   deepcopy methods are hand-maintained.
 - `internal/policy/` resolves names/defaults/forced paths and rejects
@@ -23,9 +23,7 @@ an operational preference.
 - **Admission wiring exists and is deployed.** `internal/webhook/`
   (`VMIMutation`) intercepts VMI CREATE in governed namespaces, resolves the
   class fail-closed (unknown/forbidden ⇒ deny with the resolver's message),
-  renders via `internal/render/`, refuses MemLock backing without
-  `--allow-memlock-backing` (KubeVirt < 1.10 silently prunes the field), and
-  stamps policy identity labels. `cmd/operator/` registers it alongside the
+  renders via `internal/render/`, and stamps policy identity labels. `cmd/operator/` registers it alongside the
   existing DRA reconciler. The earlier state (no admission handler) is
   superseded.
 - There is no new shared scheduler DRAM budget, synchronous pre-fault
@@ -39,15 +37,8 @@ behavior, **not a stakeholder product decision**.
 | Library option | Actual mutation | Missing obligation |
 |---|---|---|
 | Hugepages | `spec.domain.memory.hugepages` plus VMI resource shape | DRAM-only pool and actual guest use, consistent final pod resources, shared accounting/overhead, pre-fault placement and lifecycle |
-| MemLock | `spec.domain.memory.reservedOverhead.memLock: Required` plus VMI resource shape | Explicit lock request and success, tier placement, shared physical promises, safe failure/security and lifecycle |
 | Tiered | Annotations only; leaves guest spec unchanged | This no-op is not a guarantee of CXL eligibility, fixed split, promotion or hot-page retention |
 
-Pinned KubeVirt v1.10.0-beta.0 implementation
-`c418f32d6fefd864f19d3a7f436dd6bfa8827036` routes the permission field to
-unlimited `RLIMIT_MEMLOCK`, behind Alpha `ReservedOverheadMemlock`; its
-ordinary backing converter does not emit `<locked/>`. The MemLock library
-branch is therefore **permission configuration, not an implemented locking
-backing**. Generic mlock observations cannot validate it.
 
 Kubernetes v1.37.1 `f78e722310e50bcaca9276be22276d9e91d91308` initializes
 Memory Manager state for all topology nodes. Omitting a node from

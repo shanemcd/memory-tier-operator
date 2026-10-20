@@ -58,9 +58,9 @@ spec:
 # from (e.g. the internal registry over its default route — enable it
 # with the registry operator's config, one patch) and point the image
 # refs above at it:
-#   podman build -t <registry>/<namespace>/memory-tier-operator:v9 .
+#   podman build -t <registry>/<namespace>/memory-tier-operator:v10 .
 #   podman login <registry>
-#   podman push <registry>/<namespace>/memory-tier-operator:v9
+#   podman push <registry>/<namespace>/memory-tier-operator:v10
 # (the Containerfile COPYs prebuilt ./operator and ./driver binaries).
 #
 # Then create a MemoryTiering CR (deploy/example.yaml) for the driver,
@@ -204,15 +204,10 @@ spec:
       serviceAccountName: memory-tier-operator
       containers:
       - name: operator
-        image: image-registry.openshift-image-registry.svc:5000/kubevirt-dev/memory-tier-operator:v9
+        image: image-registry.openshift-image-registry.svc:5000/kubevirt-dev/memory-tier-operator:v10
         imagePullPolicy: Always
         args:
-          - -operator-image=image-registry.openshift-image-registry.svc:5000/kubevirt-dev/memory-tier-operator:v9
-          # MemLock backing (reservedOverhead.memLock: Required) is refused
-          # by default because upstream KubeVirt only wires the rlimit, not
-          # libvirt's <locked/> backing. The fork emits <locked/>, so this
-          # lab runs with the backing enabled.
-          - --allow-memlock-backing
+          - -operator-image=image-registry.openshift-image-registry.svc:5000/kubevirt-dev/memory-tier-operator:v10
         env:
         - name: NODE_NAME
           valueFrom:
@@ -343,17 +338,16 @@ spec:
                   type: object
                   description: >-
                     Persistence wall for DRAM-only classes
-                    (Hugepages or MemLock); ignored for Tiered.
+                    (Hugepages); ignored for Tiered.
                   properties:
                     type:
                       type: string
                       enum:
                         - Hugepages
-                        - MemLock
                       default: Hugepages
                     hugepageSize:
                       type: string
-                      description: Hugepage size (default 2Mi); MemLock ignores this.
+                      description: Hugepage size (default 2Mi).
                   required:
                     - type
                 default:

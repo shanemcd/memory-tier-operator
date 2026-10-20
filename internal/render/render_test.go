@@ -46,7 +46,7 @@ func TestDRAMOnlyHugepagesRendering(t *testing.T) {
 		t.Fatalf("hugepages not rendered: %+v", vmi.Spec.Domain.Memory)
 	}
 	if vmi.Spec.Domain.Memory.ReservedOverhead != nil {
-		t.Fatalf("memLock should not be set for hugepages backing")
+		t.Fatalf("reservedOverhead should not be set for hugepages backing")
 	}
 	req := vmi.Spec.Domain.Resources.Requests
 	lim := vmi.Spec.Domain.Resources.Limits
@@ -61,23 +61,6 @@ func TestDRAMOnlyHugepagesRendering(t *testing.T) {
 	if vmi.Annotations[RenderedPolicyAnnotation] != "gold-hp" ||
 		vmi.Annotations[RenderedSourceAnnotation] != "selection" {
 		t.Fatalf("rendering annotations not recorded: %v", vmi.Annotations)
-	}
-}
-
-func TestDRAMOnlyMemLockRendering(t *testing.T) {
-	vmi := baseVMI()
-	r := resolved("gold-lock", memoryv1alpha1.DRAMOnly,
-		&memoryv1alpha1.DRAMBacking{Type: memoryv1alpha1.MemLockBacking},
-		policy.SourceClusterDefault)
-	if err := RenderVMI(vmi, r); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	ml := vmi.Spec.Domain.Memory.ReservedOverhead.MemLock
-	if ml == nil || *ml != kubevirtv1.MemLockRequired {
-		t.Fatalf("memLock Required not rendered: %+v", vmi.Spec.Domain.Memory.ReservedOverhead)
-	}
-	if vmi.Spec.Domain.Memory.Hugepages != nil {
-		t.Fatalf("hugepages should not be set for memLock backing")
 	}
 }
 
@@ -112,24 +95,13 @@ func TestTieredLeavesUserBackingAlone(t *testing.T) {
 }
 
 func TestConflictingUserBackingRejected(t *testing.T) {
-	// user set memLock; class wants hugepages
+	// user set hugepages with a different page size; class wants hugepages
 	vmi := baseVMI()
-	vmi.Spec.Domain.Memory.ReservedOverhead = &kubevirtv1.ReservedOverhead{
-		MemLock: &[]kubevirtv1.MemLockRequirement{kubevirtv1.MemLockRequired}[0]}
+	vmi.Spec.Domain.Memory.Hugepages = &kubevirtv1.Hugepages{PageSize: "1Gi"}
 	r := resolved("gold-hp", memoryv1alpha1.DRAMOnly,
 		&memoryv1alpha1.DRAMBacking{Type: memoryv1alpha1.HugepagesBacking},
 		policy.SourceSelection)
 	err := RenderVMI(vmi, r)
-	if err == nil || !strings.Contains(err.Error(), "conflicting") {
-		t.Fatalf("want conflicting-backing error, got %v", err)
-	}
-	// user set hugepages; class wants memLock
-	vmi2 := baseVMI()
-	vmi2.Spec.Domain.Memory.Hugepages = &kubevirtv1.Hugepages{PageSize: "2Mi"}
-	r2 := resolved("gold-lock", memoryv1alpha1.DRAMOnly,
-		&memoryv1alpha1.DRAMBacking{Type: memoryv1alpha1.MemLockBacking},
-		policy.SourceSelection)
-	err = RenderVMI(vmi2, r2)
 	if err == nil || !strings.Contains(err.Error(), "conflicting") {
 		t.Fatalf("want conflicting-backing error, got %v", err)
 	}

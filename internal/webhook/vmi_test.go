@@ -51,16 +51,6 @@ func goldHPPolicy() *memoryv1alpha1.MemoryPolicy {
 	}
 }
 
-func goldLockPolicy() *memoryv1alpha1.MemoryPolicy {
-	return &memoryv1alpha1.MemoryPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "gold-lock"},
-		Spec: memoryv1alpha1.MemoryPolicySpec{
-			Mode:    memoryv1alpha1.DRAMOnly,
-			Backing: &memoryv1alpha1.DRAMBacking{Type: memoryv1alpha1.MemLockBacking},
-		},
-	}
-}
-
 func tieredPolicy() *memoryv1alpha1.MemoryPolicy {
 	return &memoryv1alpha1.MemoryPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "tiered"},
@@ -97,12 +87,12 @@ func vmiRequest(t *testing.T, s *runtime.Scheme, annotation string) admission.Re
 	}
 }
 
-func newHandler(t *testing.T, policies []memoryv1alpha1.MemoryPolicy, allowMemLock bool) *VMIMutation {
+func newHandler(t *testing.T, policies []memoryv1alpha1.MemoryPolicy) *VMIMutation {
 	t.Helper()
 	s := testScheme(t)
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithLists(&memoryv1alpha1.MemoryPolicyList{Items: policies}).Build()
-	return &VMIMutation{Client: c, Decoder: admission.NewDecoder(s), AllowMemLockBacking: allowMemLock}
+	return &VMIMutation{Client: c, Decoder: admission.NewDecoder(s)}
 }
 
 func patchPaths(t *testing.T, resp admission.Response) []string {
@@ -136,7 +126,7 @@ func hasPathContaining(paths []string, substr string) bool {
 // shape + decision annotations.
 func TestDRAMOnlyHugepagesPatched(t *testing.T) {
 	s := testScheme(t)
-	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldHPPolicy(), *tieredPolicy()}, false)
+	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldHPPolicy(), *tieredPolicy()})
 	resp := h.Handle(context.Background(), vmiRequest(t, s, "gold-hp"))
 	if !resp.Allowed {
 		t.Fatalf("expected allowed, got deny: %s", resp.Result.Message)
@@ -164,7 +154,7 @@ func TestDRAMOnlyHugepagesPatched(t *testing.T) {
 // tiered: allowed, annotations only — the spec is untouched.
 func TestTieredOnlyAnnotates(t *testing.T) {
 	s := testScheme(t)
-	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldHPPolicy(), *tieredPolicy()}, false)
+	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldHPPolicy(), *tieredPolicy()})
 	resp := h.Handle(context.Background(), vmiRequest(t, s, "tiered"))
 	if !resp.Allowed {
 		t.Fatalf("expected allowed, got deny: %s", resp.Result.Message)
@@ -179,7 +169,7 @@ func TestTieredOnlyAnnotates(t *testing.T) {
 // unknown class: denied, fail closed.
 func TestUnknownClassDenied(t *testing.T) {
 	s := testScheme(t)
-	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*tieredPolicy()}, false)
+	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*tieredPolicy()})
 	resp := h.Handle(context.Background(), vmiRequest(t, s, "nonexistent"))
 	if resp.Allowed {
 		t.Fatal("expected deny for unknown class")
@@ -198,7 +188,7 @@ func TestForbiddenClassDenied(t *testing.T) {
 			{Namespace: "demo", Forbidden: []string{"gold-hp"}},
 		},
 	}
-	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*p, *tieredPolicy()}, false)
+	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*p, *tieredPolicy()})
 	resp := h.Handle(context.Background(), vmiRequest(t, s, "gold-hp"))
 	if resp.Allowed {
 		t.Fatal("expected deny for forbidden class")
@@ -211,7 +201,7 @@ func TestForbiddenClassDenied(t *testing.T) {
 // no selection, cluster default exists: resolved to the default.
 func TestNoSelectionUsesClusterDefault(t *testing.T) {
 	s := testScheme(t)
-	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldHPPolicy()}, false)
+	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldHPPolicy()})
 	resp := h.Handle(context.Background(), vmiRequest(t, s, "-"))
 	if !resp.Allowed {
 		t.Fatalf("expected allowed via cluster default, got: %s", resp.Result.Message)
@@ -224,39 +214,13 @@ func TestNoSelectionUsesClusterDefault(t *testing.T) {
 // no selection, no default: denied (governed namespaces must resolve).
 func TestNoDefaultDenied(t *testing.T) {
 	s := testScheme(t)
-	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*tieredPolicy()}, false)
+	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*tieredPolicy()})
 	resp := h.Handle(context.Background(), vmiRequest(t, s, "-"))
 	if resp.Allowed {
 		t.Fatal("expected deny when nothing resolves")
 	}
 	if !strings.Contains(resp.Result.Message, "no memory policy class") {
 		t.Errorf("unexpected message: %s", resp.Result.Message)
-	}
-}
-
-// MemLock backing without the opt-in: denied rather than silently pruned.
-func TestMemLockRefusedWithoutOptIn(t *testing.T) {
-	s := testScheme(t)
-	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldLockPolicy()}, false)
-	resp := h.Handle(context.Background(), vmiRequest(t, s, "gold-lock"))
-	if resp.Allowed {
-		t.Fatal("expected deny for MemLock without opt-in")
-	}
-	if !strings.Contains(resp.Result.Message, "prune the field silently") {
-		t.Errorf("unexpected message: %s", resp.Result.Message)
-	}
-}
-
-// MemLock backing with the opt-in: allowed and rendered.
-func TestMemLockAllowedWithOptIn(t *testing.T) {
-	s := testScheme(t)
-	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldLockPolicy()}, true)
-	resp := h.Handle(context.Background(), vmiRequest(t, s, "gold-lock"))
-	if !resp.Allowed {
-		t.Fatalf("expected allowed with opt-in, got: %s", resp.Result.Message)
-	}
-	if !hasPath(patchPaths(t, resp), "/spec/domain/memory/reservedOverhead") {
-		t.Errorf("expected memLock rendering, got %v", patchPaths(t, resp))
 	}
 }
 
@@ -275,7 +239,7 @@ func TestConflictingUserBackingDenied(t *testing.T) {
 	}
 	req.Object.Raw = raw
 
-	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldHPPolicy()}, false)
+	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldHPPolicy()})
 	resp := h.Handle(context.Background(), req)
 	if resp.Allowed {
 		t.Fatal("expected deny for conflicting user-specified backing")
@@ -289,7 +253,7 @@ func TestConflictingUserBackingDenied(t *testing.T) {
 // MutatingWebhookConfiguration registers CREATE only).
 func TestNonCreatePassesThrough(t *testing.T) {
 	s := testScheme(t)
-	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldHPPolicy()}, false)
+	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldHPPolicy()})
 	req := vmiRequest(t, s, "gold-hp")
 	req.Operation = admissionv1.Update
 	resp := h.Handle(context.Background(), req)
@@ -302,7 +266,7 @@ func TestNonCreatePassesThrough(t *testing.T) {
 }
 
 func TestPolicyLabelsStamped(t *testing.T) {
-	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldHPPolicy()}, false)
+	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldHPPolicy()})
 	req := vmiRequest(t, testScheme(t), "gold-hp")
 	resp := h.Handle(context.Background(), req)
 	if !resp.Allowed {
@@ -318,7 +282,7 @@ func TestPolicyLabelsStamped(t *testing.T) {
 }
 
 func TestPolicyModeLabelReflectsClassMode(t *testing.T) {
-	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*tieredPolicy()}, false)
+	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*tieredPolicy()})
 	req := vmiRequest(t, testScheme(t), "tiered")
 	resp := h.Handle(context.Background(), req)
 	if !resp.Allowed {
@@ -331,7 +295,7 @@ func TestPolicyModeLabelReflectsClassMode(t *testing.T) {
 }
 
 func TestExistingLabelsPreserved(t *testing.T) {
-	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldHPPolicy()}, false)
+	h := newHandler(t, []memoryv1alpha1.MemoryPolicy{*goldHPPolicy()})
 	req := vmiRequest(t, testScheme(t), "gold-hp")
 	vmi := &kubevirtv1.VirtualMachineInstance{}
 	if err := json.Unmarshal(req.Object.Raw, vmi); err != nil {

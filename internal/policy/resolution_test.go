@@ -186,9 +186,12 @@ func TestDefaultedBacking(t *testing.T) {
 	q := resource.MustParse("1Gi")
 	r2 := &Resolved{Policy: &memoryv1alpha1.MemoryPolicy{Spec: memoryv1alpha1.MemoryPolicySpec{
 		Mode: memoryv1alpha1.DRAMOnly,
-		Backing: &memoryv1alpha1.DRAMBacking{Type: memoryv1alpha1.MemLockBacking, HugepageSize: &q}}}}
+		Backing: &memoryv1alpha1.DRAMBacking{Type: memoryv1alpha1.HugepagesBacking, HugepageSize: &q}}}}
 	b2 := r2.DefaultedBacking()
-	if b2.Type != memoryv1alpha1.MemLockBacking {
-		t.Fatalf("want MemLock preserved, got %v", b2.Type)
+	if b2.Type != memoryv1alpha1.HugepagesBacking {
+		t.Fatalf("want Hugepages preserved, got %v", b2.Type)
+	}
+	if b2.HugepageSize == nil || b2.HugepageSize.String() != "1Gi" {
+		t.Fatalf("want explicit 1Gi preserved, got %v", b2.HugepageSize)
 	}
 }

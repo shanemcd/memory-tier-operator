@@ -59,17 +59,16 @@ spec:
                   type: object
                   description: >-
                     Persistence wall for DRAM-only classes
-                    (Hugepages or MemLock); ignored for Tiered.
+                    (Hugepages); ignored for Tiered.
                   properties:
                     type:
                       type: string
                       enum:
                         - Hugepages
-                        - MemLock
                       default: Hugepages
                     hugepageSize:
                       type: string
-                      description: Hugepage size (default 2Mi); MemLock ignores this.
+                      description: Hugepage size (default 2Mi).
                   required:
                     - type
                 default:

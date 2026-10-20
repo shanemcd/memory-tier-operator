@@ -4,11 +4,9 @@
 // These existing-field mutations do not implement a complete tier contract:
 //
 //   - DRAMOnly sets matching VMI CPU/memory requests and limits plus
-//     hugepage backing or spec.domain.memory.reservedOverhead.memLock.
-//     Final launcher QoS/overhead must be checked separately. Static is
-//     a NUMA planner, not a DRAM selector: omitted reservedMemory nodes
-//     are not excluded. In pinned KubeVirt v1.10.0-beta.0, MemLockRequired
-//     raises RLIMIT_MEMLOCK but does not request locked guest backing.
+//     hugepage backing. Final launcher QoS/overhead must be checked
+//     separately. Static is a NUMA planner, not a DRAM selector: omitted
+//     reservedMemory nodes are not excluded.
 //   - Tiered leaves the spec unchanged and annotates the decision.
 //     This is intent metadata, not measured residency or a hot-set promise.
 //
@@ -65,22 +63,6 @@ func RenderVMI(vmi *kubevirtv1.VirtualMachineInstance, r *policy.Resolved) error
 	}
 }
 
-// memLockOf reads spec.domain.memory.reservedOverhead.memLock.
-func memLockOf(mem *kubevirtv1.Memory) *kubevirtv1.MemLockRequirement {
-	if mem == nil || mem.ReservedOverhead == nil {
-		return nil
-	}
-	return mem.ReservedOverhead.MemLock
-}
-
-// setMemLock writes spec.domain.memory.reservedOverhead.memLock.
-func setMemLock(mem *kubevirtv1.Memory, v kubevirtv1.MemLockRequirement) {
-	if mem.ReservedOverhead == nil {
-		mem.ReservedOverhead = &kubevirtv1.ReservedOverhead{}
-	}
-	mem.ReservedOverhead.MemLock = &v
-}
-
 func renderDRAMOnly(vmi *kubevirtv1.VirtualMachineInstance, r *policy.Resolved) error {
 	if err := renderBacking(vmi, r.DefaultedBacking()); err != nil {
 		return err
@@ -88,7 +70,7 @@ func renderDRAMOnly(vmi *kubevirtv1.VirtualMachineInstance, r *policy.Resolved) 
 	return renderGuaranteedShape(vmi)
 }
 
-// renderBacking sets the candidate backing field (MemLock is permission only).
+// renderBacking sets the candidate backing field.
 // An existing user-specified conflicting setting is an error.
 func renderBacking(vmi *kubevirtv1.VirtualMachineInstance, b memoryv1alpha1.DRAMBacking) error {
 	mem := vmi.Spec.Domain.Memory
@@ -98,9 +80,6 @@ func renderBacking(vmi *kubevirtv1.VirtualMachineInstance, b memoryv1alpha1.DRAM
 	}
 	switch b.Type {
 	case memoryv1alpha1.HugepagesBacking:
-		if ml := memLockOf(mem); ml != nil && *ml == kubevirtv1.MemLockRequired {
-			return fmt.Errorf("render: class backing is Hugepages but the VMI already sets memLock: Required (conflicting user-specified backing)")
-		}
 		size := "2Mi"
 		if b.HugepageSize != nil && !b.HugepageSize.IsZero() {
 			size = b.HugepageSize.String()
@@ -112,15 +91,6 @@ func renderBacking(vmi *kubevirtv1.VirtualMachineInstance, b memoryv1alpha1.DRAM
 		if mem.Hugepages == nil {
 			mem.Hugepages = &kubevirtv1.Hugepages{PageSize: size}
 		}
-	case memoryv1alpha1.MemLockBacking:
-		if mem.Hugepages != nil {
-			return fmt.Errorf("render: class backing is MemLock but the VMI already sets hugepages %s (conflicting user-specified backing)",
-				mem.Hugepages.PageSize)
-		}
-		if ml := memLockOf(mem); ml != nil && *ml == kubevirtv1.MemLockNotRequired {
-			return fmt.Errorf("render: class backing is MemLock but the VMI explicitly sets memLock: NotRequired (conflicting user-specified backing)")
-		}
-		setMemLock(mem, kubevirtv1.MemLockRequired)
 	default:
 		return fmt.Errorf("render: unknown backing type %q", b.Type)
 	}

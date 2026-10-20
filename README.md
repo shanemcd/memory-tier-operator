@@ -50,12 +50,6 @@ are lab-shaped, not a general tier classifier.
   actual guest allocation, ordinary QEMU/host overhead, capacity release and
   migration overlap must be checked. Generic hugepage wall observations are
   not validation of this complete operator policy.
-- The class renderer's `MemLock` option writes
-  `spec.domain.memory.reservedOverhead.memLock: Required`. In pinned KubeVirt
-  v1.10.0-beta.0 (`c418f32d6fefd864f19d3a7f436dd6bfa8827036`), this Alpha-gated
-  field raises `RLIMIT_MEMLOCK`; it does **not** request `<locked/>` ordinary
-  guest backing. A real explicit lock-request route, initial tier placement,
-  shared capacity, safe failure and lifecycle behavior are additional work.
 - Memory Manager Static is a NUMA planner, not a tier selector. Kubernetes
   v1.37.1 (`f78e722310e50bcaca9276be22276d9e91d91308`) includes all topology
   nodes; omission from `reservedMemory` means zero system reserve, not

@@ -6,7 +6,6 @@
 // the VMI). These are proposed types plus unwired resolution/rendering
 // functions, not a deployed admission service. Existing fields alone do not
 // establish tier placement, persistence or shared physical accounting.
-// The MemLock option currently renders a limit allowance, not a lock request.
 // Tiered permits movement without promising a split or hot-page retention.
 //
 // Infrastructure owns the proposed implementation; the executable still
@@ -33,30 +32,26 @@ const (
 	Tiered MemoryPolicyMode = "Tiered"
 )
 
-// BackingType selects a candidate rendering; MemLock is permission only.
-// +kubebuilder:validation:Enum=Hugepages;MemLock
+// BackingType selects the candidate rendering.
+// +kubebuilder:validation:Enum=Hugepages
 type BackingType string
 
 const (
 	// HugepagesBacking renders spec.domain.memory.hugepages. DRAM pool
 	// locality, actual guest use and shared accounting need validation.
 	HugepagesBacking BackingType = "Hugepages"
-	// MemLockBacking renders spec.domain.memory.reservedOverhead.memLock:
-	// Required. Pinned KubeVirt raises RLIMIT_MEMLOCK, not locked backing.
-	MemLockBacking BackingType = "MemLock"
 )
 
-// DRAMBacking configures a prototype candidate field. Only permission is
-// rendered for MemLock; an explicit request mechanism is additional work.
+// DRAMBacking configures the backing rendered for DRAMOnly classes.
 // Product backing/integration decisions and runtime validation remain open.
 type DRAMBacking struct {
 	// Type selects the candidate rendering.
-	// +kubebuilder:validation:Enum=Hugepages;MemLock
+	// +kubebuilder:validation:Enum=Hugepages
 	// +kubebuilder:default=Hugepages
 	Type BackingType `json:"type"`
 
 	// HugepageSize is the hugepage size for Hugepages backing
-	// (default 2Mi). Ignored for MemLock.
+	// (default 2Mi).
 	// +optional
 	HugepageSize *resource.Quantity `json:"hugepageSize,omitempty"`
 }
