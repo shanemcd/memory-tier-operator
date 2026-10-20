@@ -18,6 +18,7 @@ spec:
         memorytiering.shanemcd.com/policy-class: gold-hp
     spec:
       domain:
+        devices: {}
         memory:
           guest: 1Gi
         disks:
@@ -45,6 +46,7 @@ spec:
         memorytiering.shanemcd.com/policy-class: tiered
     spec:
       domain:
+        devices: {}
         memory:
           guest: 1Gi
         disks:
