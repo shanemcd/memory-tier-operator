@@ -44,12 +44,10 @@ spec:
     metadata:
       annotations:
         memorytiering.shanemcd.com/policy-class: tiered
-        # The tier-aware descheduler may evict this VM from a node whose
-        # DRAM comes under pressure (that is the stack working). Pin it to
-        # the CXL node for the pressure side-by-side demo, and ask the
-        # descheduler to leave it alone while the presser runs.
-        descheduler.alpha.kubernetes.io/evict: "false"
     spec:
+      # Keep the comparison on a CXL node. This does not prevent eviction.
+      # Pause the descheduler during controlled pressure tests; the presence
+      # of its "evict" annotation is not an opt-out, even with value "false".
       nodeSelector:
         kubernetes.io/hostname: worker-cxl-0
       domain:
